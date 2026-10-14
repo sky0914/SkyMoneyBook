@@ -87,8 +87,11 @@
         .ledger-theme button:disabled { opacity: .5; cursor: wait; }
         .ledger-theme table { font-variant-numeric: tabular-nums; }
         .ledger-theme .cashflow-scroll { overflow-x: auto; max-width: 100%; }
-        .ledger-theme .cashflow-table { table-layout: fixed; }
-        .ledger-theme .cashflow-table input { width: 100%; min-width: 0; box-sizing: border-box; }
+        .ledger-theme .cashflow-table { table-layout: fixed; font-size: 13px; line-height: 1.4; }
+        .ledger-theme .cashflow-table th, .ledger-theme .cashflow-table td { padding: 6px 8px; }
+        .ledger-theme .cashflow-table tbody td:has(input), .ledger-theme .cashflow-table tfoot td:has(input) { padding: 0; }
+        .ledger-theme .cashflow-table th:first-child { width: 80px; white-space: nowrap; }
+        .ledger-theme .cashflow-table input { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 8px; min-height: 32px; }
         .ledger-theme .transaction-table { min-width: 640px; }
         .ledger-theme .transaction-table td:first-child { white-space: nowrap; }
         .ledger-theme table.text-xs { min-width: 900px; }
@@ -271,10 +274,10 @@
         </div>
 
         <!-- ================= 頁籤一：日常開銷明細 ================= -->
-        <section v-show="activeTab === 'cashflow'" class="bg-cardBg border border-borderCol rounded-2xl p-4 sm:p-6 mb-6">
-            <div class="flex flex-wrap gap-3 justify-between items-center mb-4"><div><h2 class="text-xl font-semibold text-white">{{ selectedYear }} 年現金流配息記錄</h2><p class="text-xs text-gray-400 mt-2">直接填寫每月金額，完成後一併提交。總計依圖片直接加總各欄，不換算匯率。</p></div><button @click="saveCashflowRecord" :disabled="isSubmitting || !cashflowReady" class="primary-action px-4 py-3 rounded-xl text-sm disabled:opacity-40">提交配息記錄</button></div>
+        <section v-show="activeTab === 'cashflow'" class="bg-cardBg border border-borderCol rounded-2xl p-3 sm:p-4 mb-4">
+            <div class="flex flex-wrap gap-2 justify-between items-center mb-3"><div><h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年現金流配息記錄</h2><p class="text-xs text-gray-400 mt-1">直接填寫每月金額，完成後一併提交。總計依圖片直接加總各欄，不換算匯率。</p></div><button @click="saveCashflowRecord" :disabled="isSubmitting || !cashflowReady" class="primary-action px-3 py-2 rounded-xl text-sm disabled:opacity-40">提交配息記錄</button></div>
             <p v-if="!cashflowReady" role="status" class="text-sm text-amber-300 mb-4">請部署新版 GAS 並重新載入，才能填寫與儲存配息記錄。</p>
-            <div class="cashflow-scroll overflow-x-auto"><table class="w-full text-sm border-collapse cashflow-table" style="min-width:780px">
+            <div class="cashflow-scroll overflow-x-auto"><table class="w-full text-sm border-collapse cashflow-table" style="min-width:700px">
                 <thead><tr class="bg-darkBg"><th class="p-3 border border-borderCol">月份</th><th v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol">{{ col.label }}</th><th class="p-3 border border-borderCol">總計</th></tr></thead>
                 <tbody><tr v-for="month in 12" :key="month"><th class="p-2 border border-borderCol font-normal">{{ month }}</th><td v-for="col in cashflowColumns" :key="col.key" class="border border-borderCol"><input type="number" min="0" step="0.01" :aria-label="month + ' 月 ' + col.label" v-model.number="currentCashflow.months[month][col.key]" :disabled="isSubmitting || !cashflowReady" class="w-full min-w-0 bg-transparent text-right p-3 outline-none focus:bg-darkBg focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthTotal(month)) }}</td></tr></tbody>
                 <tfoot><tr class="bg-darkBg font-semibold"><th class="p-3 border border-borderCol">年度合計</th><td v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol text-right font-mono">{{ formatMoney(cashflowColumnTotal(col.key)) }}</td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthlyTotal) }}</td></tr>
@@ -282,7 +285,7 @@
                 <tr><td colspan="5" class="p-3 text-right">美金定存利息</td><td class="border border-borderCol"><input aria-label="美金定存利息" type="number" min="0" step="0.01" v-model.number="currentCashflow.depositUSD" :disabled="isSubmitting || !cashflowReady" class="w-full bg-transparent text-right p-3 focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td></td></tr>
                 <tr class="bg-darkBg"><td colspan="6" class="p-3 text-right font-semibold">年度總計（含定存利息）</td><td class="p-3 text-right font-semibold font-mono text-accentRed">{{ formatMoney(cashflowAnnualTotal) }}</td></tr></tfoot>
             </table></div>
-            <p class="text-xs text-gray-400 mt-4">此頁獨立記錄配息／現金流，不會修改基金投資頁；空白與 0 分別保存。</p>
+            <p class="text-xs text-gray-400 mt-2">此頁獨立記錄配息／現金流，不會修改基金投資頁；空白與 0 分別保存。</p>
         </section>
 
         <div v-show="activeTab === 'transactions'">
