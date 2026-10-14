@@ -86,6 +86,9 @@
         .ledger-theme button:focus-visible { outline: 2px solid #c6dedc; outline-offset: 3px; }
         .ledger-theme button:disabled { opacity: .5; cursor: wait; }
         .ledger-theme table { font-variant-numeric: tabular-nums; }
+        .ledger-theme .cashflow-scroll { overflow-x: auto; max-width: 100%; }
+        .ledger-theme .cashflow-table { table-layout: fixed; }
+        .ledger-theme .cashflow-table input { width: 100%; min-width: 0; box-sizing: border-box; }
         .ledger-theme .transaction-table { min-width: 640px; }
         .ledger-theme .transaction-table td:first-child { white-space: nowrap; }
         .ledger-theme table.text-xs { min-width: 900px; }
@@ -264,9 +267,24 @@
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-landmark"></i> 資產負債紀錄
             </button>
+            <button @click="activeTab = 'cashflow'" :aria-current="activeTab === 'cashflow' ? 'page' : null" :class="activeTab === 'cashflow' ? 'tab-active' : 'tab-idle'" class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition border cursor-pointer whitespace-nowrap">現金流配息記錄</button>
         </div>
 
         <!-- ================= 頁籤一：日常開銷明細 ================= -->
+        <section v-show="activeTab === 'cashflow'" class="bg-cardBg border border-borderCol rounded-2xl p-4 sm:p-6 mb-6">
+            <div class="flex flex-wrap gap-3 justify-between items-center mb-4"><div><h2 class="text-xl font-semibold text-white">{{ selectedYear }} 年現金流配息記錄</h2><p class="text-xs text-gray-400 mt-2">直接填寫每月金額，完成後一併提交。總計依圖片直接加總各欄，不換算匯率。</p></div><button @click="saveCashflowRecord" :disabled="isSubmitting || !cashflowReady" class="primary-action px-4 py-3 rounded-xl text-sm disabled:opacity-40">提交配息記錄</button></div>
+            <p v-if="!cashflowReady" role="status" class="text-sm text-amber-300 mb-4">請部署新版 GAS 並重新載入，才能填寫與儲存配息記錄。</p>
+            <div class="cashflow-scroll overflow-x-auto"><table class="w-full text-sm border-collapse cashflow-table" style="min-width:780px">
+                <thead><tr class="bg-darkBg"><th class="p-3 border border-borderCol">月份</th><th v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol">{{ col.label }}</th><th class="p-3 border border-borderCol">總計</th></tr></thead>
+                <tbody><tr v-for="month in 12" :key="month"><th class="p-2 border border-borderCol font-normal">{{ month }}</th><td v-for="col in cashflowColumns" :key="col.key" class="border border-borderCol"><input type="number" min="0" step="0.01" :aria-label="month + ' 月 ' + col.label" v-model.number="currentCashflow.months[month][col.key]" :disabled="isSubmitting || !cashflowReady" class="w-full min-w-0 bg-transparent text-right p-3 outline-none focus:bg-darkBg focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthTotal(month)) }}</td></tr></tbody>
+                <tfoot><tr class="bg-darkBg font-semibold"><th class="p-3 border border-borderCol">年度合計</th><td v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol text-right font-mono">{{ formatMoney(cashflowColumnTotal(col.key)) }}</td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthlyTotal) }}</td></tr>
+                <tr><td colspan="5" class="p-3 text-right">台幣定存利息</td><td class="border border-borderCol"><input aria-label="台幣定存利息" type="number" min="0" step="0.01" v-model.number="currentCashflow.depositTWD" :disabled="isSubmitting || !cashflowReady" class="w-full bg-transparent text-right p-3 focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td></td></tr>
+                <tr><td colspan="5" class="p-3 text-right">美金定存利息</td><td class="border border-borderCol"><input aria-label="美金定存利息" type="number" min="0" step="0.01" v-model.number="currentCashflow.depositUSD" :disabled="isSubmitting || !cashflowReady" class="w-full bg-transparent text-right p-3 focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td></td></tr>
+                <tr class="bg-darkBg"><td colspan="6" class="p-3 text-right font-semibold">年度總計（含定存利息）</td><td class="p-3 text-right font-semibold font-mono text-accentRed">{{ formatMoney(cashflowAnnualTotal) }}</td></tr></tfoot>
+            </table></div>
+            <p class="text-xs text-gray-400 mt-4">此頁獨立記錄配息／現金流，不會修改基金投資頁；空白與 0 分別保存。</p>
+        </section>
+
         <div v-show="activeTab === 'transactions'">
             <div class="bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl mb-6">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
@@ -883,6 +901,7 @@
                             if (!isNaN(yr) && !years.includes(yr)) years.push(yr);
                         }
                     });
+                    for (const year of Object.keys(cashflowRecords.value)) if (!years.includes(Number(year))) years.push(Number(year));
                     return years.sort((a, b) => a - b);
                 });
 
@@ -891,7 +910,7 @@
                 const syncError = ref('');
                 const pendingSave = ref(null);
                 let remoteSnapshot = null;
-                const cleanData = ref({ transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {} });
+                const cleanData = ref({ transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {} });
                 let toastTimer;
                 const clone = value => JSON.parse(JSON.stringify(value));
                 // Automatic blank rows are clean defaults, not edits. Preserve existing baselines.
@@ -917,14 +936,36 @@
                     const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' }, url);
                     if (!res.ok) throw new Error('雲端讀取失敗（HTTP ' + res.status + '）');
                     const data = await res.json();
-                    const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords'];
-                    if (!data || ![3, 4].includes(data.protocolVersion) || !data.revisions ||
+                    const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords', ...(data.protocolVersion >= 6 ? ['cashflowRecords'] : [])];
+                    if (!data || ![3, 4, 6].includes(data.protocolVersion) || !data.revisions ||
                         !keys.every(field => typeof data.revisions[field] === 'string' &&
                             (field === 'transactions' ? Array.isArray(data[field]) :
                                 data[field] && typeof data[field] === 'object' && !Array.isArray(data[field])))) {
                         throw new Error('後端版本或資料格式不符，請部署新版 GAS 後再同步');
                     }
                     return data;
+                };
+                const cashflowRecords = ref({});
+                const cashflowReady = ref(false);
+                const cashflowColumns = [{key:'fundTWD',label:'基金(台)'},{key:'fundUSD',label:'基金(美)'},{key:'etfTWD',label:'ETF(台)'},{key:'allianzUSD',label:'安聯(美)'},{key:'insurance',label:'保險'}];
+                const emptyCashflow = () => ({months:Object.fromEntries(Array.from({length:12},(_,i)=>[i+1,Object.fromEntries(cashflowColumns.map(c=>[c.key,'']))])),depositTWD:'',depositUSD:''});
+                const initCashflow = year => {
+                    if (!cashflowRecords.value[year]) cashflowRecords.value[year] = emptyCashflow();
+                    registerDefaults('cashflowRecords',[String(year)],emptyCashflow());
+                };
+                const currentCashflow = computed(() => {initCashflow(selectedYear.value);return cashflowRecords.value[selectedYear.value];});
+                const cashflowRound = n => Math.round((n + Number.EPSILON)*100)/100;
+                const cashflowMonthTotal = month => cashflowRound(cashflowColumns.reduce((n,c)=>n+Number(currentCashflow.value.months[month][c.key]||0),0));
+                const cashflowColumnTotal = key => cashflowRound(Object.values(currentCashflow.value.months).reduce((n,r)=>n+Number(r[key]||0),0));
+                const cashflowMonthlyTotal = computed(()=>cashflowRound(cashflowColumns.reduce((n,c)=>n+cashflowColumnTotal(c.key),0)));
+                const cashflowAnnualTotal = computed(()=>cashflowRound(cashflowMonthlyTotal.value+Number(currentCashflow.value.depositTWD||0)+Number(currentCashflow.value.depositUSD||0)));
+                const saveCashflowRecord = () => {
+                    if (!cashflowReady.value) {syncError.value='請先部署新版 GAS 並載入配息記錄。';return false;}
+                    for (const record of Object.values(cashflowRecords.value)) {
+                        const values = [record.depositTWD,record.depositUSD,...Object.values(record.months).flatMap(row=>cashflowColumns.map(c=>row[c.key]))];
+                        if (values.some(v=>v!=='' && (typeof v!=='number' || !Number.isFinite(v) || v<0))) {syncError.value='配息金額請填寫非負數字。';return false;}
+                    }
+                    return saveCloud('saveCashflow','cashflowRecords',cashflowRecords.value,`${selectedYear.value} 年配息記錄已確認儲存`);
                 };
                 const reportFailure = err => {
                     syncStatus.value = '同步未完成';
@@ -1268,7 +1309,7 @@
                 }, { deep: true });
 
                 const datasetRefs = () => ({ transactions: transactions.value, summaries: allSummaries.value,
-                    assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value });
+                    assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value });
                 const editableSnapshot = (key, value) => {
                     const strip = data => {
                         if (Array.isArray(data)) return data.map(strip);
@@ -1282,7 +1323,7 @@
                             if (v && typeof v === 'object') result[field] = strip(v);
                             else if (['note', 'baseNote', 'date', 'title', 'category', 'type'].includes(field)) result[field] = String(v ?? '');
                             else if (key === 'transactions') result[field] = v;
-                            else result[field] = key === 'fundsRecords' && (v === '' || v === null || v === undefined) ? '' : Number(v || 0);
+                            else result[field] = ['fundsRecords','cashflowRecords'].includes(key) && (v === '' || v === null || v === undefined) ? '' : Number(v || 0);
                         }
                         return result;
                     };
@@ -1291,7 +1332,7 @@
                 const datasetDirty = Object.fromEntries(Object.keys(cleanData.value).map(key => [key, computed(() =>
                     canonical(editableSnapshot(key, datasetRefs()[key])) !== canonical(editableSnapshot(key, cleanData.value[key])))]));
                 const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
-                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資' };
+                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
                 const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value);
 
@@ -1308,7 +1349,10 @@
                         allSummaries.value = clone(data.summaries);
                         assetsRecords.value = clone(data.assetsRecords);
                         if (!data.datasetErrors?.fundsRecords) fundsRecords.value = clone(data.fundsRecords);
+                        cashflowReady.value = data.protocolVersion >= 6 && !data.datasetErrors?.cashflowRecords;
+                        if (cashflowReady.value) cashflowRecords.value = clone(data.cashflowRecords);
                         remoteSnapshot = clone(data);
+                        initCashflow(selectedYear.value);
                         pendingSave.value = null;
                         initYearStructure(selectedYear.value);
                         initFundsStructure(selectedYear.value);
@@ -1322,6 +1366,7 @@
                         for (const key in current) if (!data.datasetErrors?.[key]) cleanData.value[key] = clone(current[key]);
                         showModal.value = false;
                         syncStatus.value = '雲端資料讀取完成';
+                        if (data.datasetErrors?.cashflowRecords) syncError.value = '配息資料讀取失敗：' + data.datasetErrors.cashflowRecords;
                         if (data.datasetErrors?.fundsRecords) {
                             syncError.value = '基金資料讀取失敗：' + data.datasetErrors.fundsRecords + '。其他頁面仍可使用；基金儲存已停止。';
                         }
@@ -1406,7 +1451,7 @@
                 const retrySave = () => {
                     const pending = pendingSave.value;
                     if (pending) {
-                        const current = { transactions: transactions.value, summaries: allSummaries.value, assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value };
+                        const current = { transactions: transactions.value, summaries: allSummaries.value, assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value };
                         return saveCloud(pending.action, pending.key, current[pending.key], pending.message);
                     }
                 };
@@ -1538,6 +1583,7 @@
                 };
 
                 return {
+                    cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
                     activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
