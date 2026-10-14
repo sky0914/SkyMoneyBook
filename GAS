@@ -1,0 +1,206 @@
+function getOrCreateSheet_(ss, sheetName) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  }
+  return sheet;
+}
+
+function doGet(e) {
+  var ss = SpreadsheetApp.openById("16JQJXIZXfkNsoIHOuuipvJaEah_Bbq2U0UdXo5n2HSA");
+  
+  try {
+    // 1. 讀取明細
+    var sheetTx = getOrCreateSheet_(ss, "明細");
+    var rowsTx = sheetTx.getDataRange().getValues();
+    var transactions = [];
+    for (var i = 1; i < rowsTx.length; i++) {
+      if (!rowsTx[i][0]) continue;
+      transactions.push({
+        id: i,
+        date: rowsTx[i][0],
+        title: rowsTx[i][1],
+        amount: rowsTx[i][2],
+        category: rowsTx[i][3],
+        type: rowsTx[i][4]
+      });
+    }
+
+    // 2. 讀取年度摘要
+    var sheetSummary = getOrCreateSheet_(ss, "年度摘要");
+    var rowsSummary = sheetSummary.getDataRange().getValues();
+    var summaries = {};
+    if (rowsSummary.length > 1 && rowsSummary[0][0] === "年份") {
+      for (var i = 1; i < rowsSummary.length; i++) {
+        var r = rowsSummary[i];
+        var yr = r[0];
+        var m = r[1];
+        if (yr && m) {
+          if (!summaries[yr]) summaries[yr] = {};
+          summaries[yr][m] = {
+            month: m,
+            salary: r[2] || 0,
+            insurance: r[3] || 0,
+            extraIncome: r[4] || 0,
+            livingExpense: r[5] || 0,
+            insuranceExpense: r[6] || 0,
+            otherExpense: r[7] || 0,
+            familyExpense: r[8] || 0,
+            note: r[9] || ""
+          };
+        }
+      }
+    }
+
+    // 3. 讀取資產負債紀錄
+    var sheetAssets = getOrCreateSheet_(ss, "資產負債");
+    var rowsAssets = sheetAssets.getDataRange().getValues();
+    var assetsRecords = {}; 
+    if (rowsAssets.length > 1 && rowsAssets[0][0] === "記錄年月") {
+      for (var i = 1; i < rowsAssets.length; i++) {
+        var r = rowsAssets[i];
+        var ym = r[0]; 
+        if (ym) {
+          assetsRecords[ym] = {
+            date: r[1] || "",
+            postOffice: r[2] || 0,
+            ctbc: r[3] || 0,
+            sinopac: r[4] || 0,
+            entie: r[5] || 0,
+            lineBank: r[6] || 0,
+            cash: r[7] || 0,
+            ccCtbc: r[8] || 0,
+            ccFubon: r[9] || 0,
+            ccEsun: r[10] || 0,
+            ccKGI: r[11] || 0,
+            ccDBS: r[12] || 0,
+            payJko: r[13] || 0,
+            payLine: r[14] || 0,
+            momo: r[15] || 0,
+            voucherHi: r[16] || 0,
+            pxMart: r[17] || 0,
+            edatan: r[18] || 0,
+            hanlai: r[19] || 0,
+            otherHome: r[20] || 0,
+            otherAdvance: r[21] || 0,
+            otherCatFund: r[22] || 0,
+            invEntieTWD: r[23] || 0,
+            rawEntieUSD: r[24] || 0,
+            rateEntieUSD: r[25] || 32.14,
+            invEntieUSD: r[26] || 0,
+            invAllianz: r[27] || 0,
+            insFarglory: r[28] || 0,
+            insGlobal: r[29] || 0,
+            twdSavings: r[30] || 0,
+            etfStock: r[31] || 0,
+            rawJPY: r[32] || 0,
+            rateJPY: r[33] || 0.203,
+            currJPY: r[34] || 0,
+            rawUSD: r[35] || 0,
+            rateUSD: r[36] || 32.14,
+            currUSD: r[37] || 0,
+            rawHKD: r[38] || 0,
+            rateHKD: r[39] || 4.1,
+            currHKD: r[40] || 0,
+            note: r[41] || ""
+          };
+        }
+      }
+    }
+
+    var result = {
+      transactions: transactions,
+      summaries: summaries,
+      assetsRecords: assetsRecords
+    };
+
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({error: err.toString()}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doPost(e) {
+  var ss = SpreadsheetApp.openById("16JQJXIZXfkNsoIHOuuipvJaEah_Bbq2U0UdXo5n2HSA");
+  
+  try {
+    var postData = JSON.parse(e.postData.contents);
+    
+    if (postData.action === "saveSummary") {
+      var sheetSummary = getOrCreateSheet_(ss, "年度摘要");
+      sheetSummary.clear();
+      sheetSummary.appendRow(["年份", "月份", "薪資收入", "勞健保等", "額外收入", "生活開銷", "保險開銷", "其它開銷", "家庭開銷", "備註"]);
+      
+      var allSummaries = postData.summaries;
+      for (var yr in allSummaries) {
+        var yearData = allSummaries[yr];
+        for (var m = 1; m <= 12; m++) {
+          var s = yearData[m] || { salary: 0, insurance: 0, extraIncome: 0, livingExpense: 0, insuranceExpense: 0, otherExpense: 0, familyExpense: 0, note: "" };
+          sheetSummary.appendRow([yr, m, s.salary, s.insurance, s.extraIncome, s.livingExpense, s.insuranceExpense, s.otherExpense, s.familyExpense, s.note]);
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({"status": "success"})).setMimeType(ContentService.MimeType.JSON);
+      
+    } else if (postData.action === "saveAssets") {
+      var sheetAssets = getOrCreateSheet_(ss, "資產負債");
+      sheetAssets.clear();
+      sheetAssets.appendRow([
+        "記錄年月", "備註日期", "郵局", "中國信託", "永豐銀行", "安泰銀行", "Line Bank", "現金",
+        "信用卡中信", "信用卡富邦", "信用卡元大", "信用卡凱基", "信用卡星展",
+        "街口支付", "LINE Pay", "MOMO", "萊爾富禮券", "全聯", "宜睿即享券", "漢來券",
+        "其他家用", "家用預支部份", "欠貓咪基金",
+        "投資安泰台幣", "投資安泰美金(原幣)", "投資安泰美金(匯率)", "投資安泰美金(台幣)", "投資安聯", "遠雄保險", "全球保險", "台幣定存", "ETF存股",
+        "日幣(原幣)", "日幣(匯率)", "日幣現金(台幣)", 
+        "美金(原幣)", "美金(匯率)", "美金現金(台幣)", 
+        "港幣(原幣)", "港幣(匯率)", "港幣現金(台幣)", 
+        "備註"
+      ]);
+      
+      var records = postData.assetsRecords; 
+      for (var ym in records) {
+        var d = records[ym];
+        sheetAssets.appendRow([
+          ym, d.date, d.postOffice, d.ctbc, d.sinopac, d.entie, d.lineBank, d.cash,
+          d.ccCtbc, d.ccFubon, d.ccEsun, d.ccKGI, d.ccDBS,
+          d.payJko, d.payLine, d.momo, d.voucherHi, d.pxMart, d.edatan, d.hanlai,
+          d.otherHome, d.otherAdvance, d.otherCatFund,
+          d.invEntieTWD, d.rawEntieUSD, d.rateEntieUSD, d.invEntieUSD, d.invAllianz, d.insFarglory, d.insGlobal, d.twdSavings, d.etfStock,
+          d.rawJPY, d.rateJPY, d.currJPY, 
+          d.rawUSD, d.rateUSD, d.currUSD, 
+          d.rawHKD, d.rateHKD, d.currHKD, 
+          d.note
+        ]);
+      }
+      return ContentService.createTextOutput(JSON.stringify({"status": "success"})).setMimeType(ContentService.MimeType.JSON);
+      
+    } else if (postData.action === "saveTransactions") {
+      // 處理開銷明細的整包覆蓋（支援刪除與修改後的同步）
+      var sheetTx = getOrCreateSheet_(ss, "明細");
+      sheetTx.clear();
+      sheetTx.appendRow(["日期", "項目", "金額", "分類", "類型"]);
+      
+      var txs = postData.transactions || [];
+      for (var i = 0; i < txs.length; i++) {
+        var t = txs[i];
+        sheetTx.appendRow([t.date, t.title, t.amount, t.category, t.type || "expense"]);
+      }
+      return ContentService.createTextOutput(JSON.stringify({"status": "success"})).setMimeType(ContentService.MimeType.JSON);
+      
+    } else {
+      // 保留單筆新增的相容機制
+      var sheetTx = getOrCreateSheet_(ss, "明細");
+      if (sheetTx.getLastRow() === 0) {
+        sheetTx.appendRow(["日期", "項目", "金額", "分類", "類型"]);
+      }
+      sheetTx.appendRow([postData.date, postData.title, postData.amount, postData.category, postData.type]);
+      
+      return ContentService.createTextOutput(JSON.stringify({"status": "success"}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({"status": "error", "message": err.toString()}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
