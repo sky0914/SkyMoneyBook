@@ -36,15 +36,15 @@ const {backend}=require('./helpers.cjs');
   await search.fill('生活開銷');assert.equal(await page.locator('.transaction-table tbody tr').count(),1);
   await page.getByRole('button',{name:'清除明細搜尋'}).click();assert.equal(await search.inputValue(),'');
   assert.deepEqual(await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.categoryTotals),categoryBefore);
-  await page.getByRole('button',{name:/年收支摘要總表/}).click();
+  await page.getByRole('button',{name:/年開銷總表/}).click();
   await page.locator('input[type=number]:visible').first().fill('123');
   await page.getByText(/尚未儲存：年度收支/).waitFor();
-  await page.getByRole('button',{name:/年基金投資記錄/}).click();await page.getByText(/尚未儲存：年度收支/).waitFor();
+  await page.getByRole('button',{name:/基金投資/}).click();await page.getByText(/尚未儲存：年度收支/).waitFor();
   console.log('Search and retained cross-tab unsaved notice passed');
   for(const [tab,key,edit,button] of [
-   ['年收支摘要總表','summaries',s=>{s.currentYearSummaries[1].salary=123},'儲存'],
-   ['年基金投資記錄','fundsRecords',s=>{s.currentFundsData.allianz.baseValue=99},'儲存'],
-   ['資產負債紀錄','assetsRecords',s=>{s.currentAssetData.cash=50},'儲存']
+   ['年開銷總表','summaries',s=>{s.currentYearSummaries[1].salary=123},'儲存'],
+   ['基金投資','fundsRecords',s=>{s.currentFundsData.allianz.baseValue=99},'儲存'],
+   ['總資產','assetsRecords',s=>{s.currentAssetData.cash=50},'儲存']
   ]){
    await page.getByRole('button',{name:new RegExp(tab)}).click();
    await page.evaluate(source=>{const s=document.querySelector('#app').__vue_app__._container._vnode.component.setupState;eval('('+source+')(s)')},edit.toString());
@@ -70,7 +70,7 @@ const {backend}=require('./helpers.cjs');
   page.removeAllListeners('dialog');page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'取消',exact:true}).click();
   assert.equal(await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.hasUnsavedChanges),false);
   console.log('Modal discard confirmation and beforeunload protection passed');
-  await page.getByRole('button',{name:'現金流配息記錄',exact:true}).click();
+  await page.getByRole('button',{name:'配息',exact:true}).click();
   const postsBefore=api.read().cashflowRecords;
   await page.getByRole('spinbutton',{name:'1 月 基金(台)',exact:true}).fill('13763');
   await page.getByRole('spinbutton',{name:'1 月 基金(美)',exact:true}).fill('6382');

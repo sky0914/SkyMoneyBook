@@ -258,19 +258,19 @@
             <button @click="activeTab = 'summary'" :aria-current="activeTab === 'summary' ? 'page' : null"
                 :class="activeTab === 'summary' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
-                <i aria-hidden="true" class="fa-solid fa-calendar-days"></i> {{ selectedYear }} 年收支摘要總表
+                <i aria-hidden="true" class="fa-solid fa-calendar-days"></i> 年開銷總表
             </button>
             <button @click="activeTab = 'funds'" :aria-current="activeTab === 'funds' ? 'page' : null"
                 :class="activeTab === 'funds' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
-                <i aria-hidden="true" class="fa-solid fa-chart-line"></i> {{ selectedYear }} 年基金投資記錄
+                <i aria-hidden="true" class="fa-solid fa-chart-line"></i> 基金投資
             </button>
             <button @click="activeTab = 'assets'" :aria-current="activeTab === 'assets' ? 'page' : null"
                 :class="activeTab === 'assets' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
-                <i aria-hidden="true" class="fa-solid fa-landmark"></i> 資產負債紀錄
+                <i aria-hidden="true" class="fa-solid fa-landmark"></i> 總資產
             </button>
-            <button @click="activeTab = 'cashflow'" :aria-current="activeTab === 'cashflow' ? 'page' : null" :class="activeTab === 'cashflow' ? 'tab-active' : 'tab-idle'" class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition border cursor-pointer whitespace-nowrap">現金流配息記錄</button>
+            <button @click="activeTab = 'cashflow'" :aria-current="activeTab === 'cashflow' ? 'page' : null" :class="activeTab === 'cashflow' ? 'tab-active' : 'tab-idle'" class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition border cursor-pointer whitespace-nowrap">配息</button>
         </div>
 
         <!-- ================= 頁籤一：日常開銷明細 ================= -->
