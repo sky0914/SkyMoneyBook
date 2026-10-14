@@ -277,15 +277,17 @@
         <section v-show="activeTab === 'cashflow'" class="bg-cardBg border border-borderCol rounded-2xl p-3 sm:p-4 mb-4">
             <div class="flex flex-wrap gap-2 justify-between items-center mb-3"><div><h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年現金流配息記錄</h2><p class="text-xs text-gray-400 mt-1">直接填寫每月金額，完成後一併提交。總計依圖片直接加總各欄，不換算匯率。</p></div><button @click="saveCashflowRecord" :disabled="isSubmitting || !cashflowReady" class="primary-action px-3 py-2 rounded-xl text-sm disabled:opacity-40">提交配息記錄</button></div>
             <p v-if="!cashflowReady" role="status" class="text-sm text-amber-300 mb-4">請部署新版 GAS 並重新載入，才能填寫與儲存配息記錄。</p>
+            <p v-if="cashflowReady && !fundInterestReady" role="alert" class="text-xs text-amber-300 mb-2">基金資料尚未成功載入，暫時無法帶入利息與提交配息。</p>
+            <p v-else-if="hasUnsavedFunds" role="status" class="text-xs text-amber-300 mb-2">已預覽基金頁修改後的利息；請先儲存基金投資，再提交配息。</p>
             <div class="cashflow-scroll overflow-x-auto"><table class="w-full text-sm border-collapse cashflow-table" style="min-width:700px">
                 <thead><tr class="bg-darkBg"><th class="p-3 border border-borderCol">月份</th><th v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol">{{ col.label }}</th><th class="p-3 border border-borderCol">總計</th></tr></thead>
-                <tbody><tr v-for="month in 12" :key="month"><th class="p-2 border border-borderCol font-normal">{{ month }}</th><td v-for="col in cashflowColumns" :key="col.key" class="border border-borderCol"><input type="number" min="0" step="0.01" :aria-label="month + ' 月 ' + col.label" v-model.number="currentCashflow.months[month][col.key]" :disabled="isSubmitting || !cashflowReady" class="w-full min-w-0 bg-transparent text-right p-3 outline-none focus:bg-darkBg focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthTotal(month)) }}</td></tr></tbody>
+                <tbody><tr v-for="month in 12" :key="month"><th class="p-2 border border-borderCol font-normal">{{ month }}</th><td v-for="col in cashflowColumns" :key="col.key" class="border border-borderCol"><input v-if="col.key === 'fundTWD'" type="number" readonly :aria-label="month + ' 月 ' + col.label" :value="cashflowFundInterest(selectedYear, month)" class="w-full min-w-0 bg-darkBg text-accentBlue text-right font-mono" placeholder="—" title="自動帶入安泰台幣每月利息，請至基金投資修改"><input v-else type="number" min="0" step="0.01" :aria-label="month + ' 月 ' + col.label" v-model.number="currentCashflow.months[month][col.key]" :disabled="isSubmitting || !cashflowReady" class="w-full min-w-0 bg-transparent text-right p-3 outline-none focus:bg-darkBg focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthTotal(month)) }}</td></tr></tbody>
                 <tfoot><tr class="bg-darkBg font-semibold"><th class="p-3 border border-borderCol">年度合計</th><td v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol text-right font-mono">{{ formatMoney(cashflowColumnTotal(col.key)) }}</td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthlyTotal) }}</td></tr>
                 <tr><td colspan="5" class="p-3 text-right">台幣定存利息</td><td class="border border-borderCol"><input aria-label="台幣定存利息" type="number" min="0" step="0.01" v-model.number="currentCashflow.depositTWD" :disabled="isSubmitting || !cashflowReady" class="w-full bg-transparent text-right p-3 focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td></td></tr>
                 <tr><td colspan="5" class="p-3 text-right">美金定存利息</td><td class="border border-borderCol"><input aria-label="美金定存利息" type="number" min="0" step="0.01" v-model.number="currentCashflow.depositUSD" :disabled="isSubmitting || !cashflowReady" class="w-full bg-transparent text-right p-3 focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td></td></tr>
                 <tr class="bg-darkBg"><td colspan="6" class="p-3 text-right font-semibold">年度總計（含定存利息）</td><td class="p-3 text-right font-semibold font-mono text-accentRed">{{ formatMoney(cashflowAnnualTotal) }}</td></tr></tfoot>
             </table></div>
-            <p class="text-xs text-gray-400 mt-2">此頁獨立記錄配息／現金流，不會修改基金投資頁；空白與 0 分別保存。</p>
+            <p class="text-xs text-gray-400 mt-2">基金(台)自動帶入同年度安泰台幣每月利息，請至基金投資修改；其他欄位仍可填寫。</p>
         </section>
 
         <div v-show="activeTab === 'transactions'">
@@ -950,6 +952,14 @@
                 };
                 const cashflowRecords = ref({});
                 const cashflowReady = ref(false);
+                const fundInterestReady = ref(false);
+                const cashflowFundInterest = (year, month) => fundInterestReady.value ? (fundsRecords.value[year]?.entieTWD?.months?.[month]?.interest ?? '') : '';
+                const cashflowCellValue = (month, key) => key === 'fundTWD' ? cashflowFundInterest(selectedYear.value, month) : currentCashflow.value.months[month][key];
+                const cashflowSnapshot = data => {
+                    const result = clone(data);
+                    for (const year in result) for (const month in result[year].months) result[year].months[month].fundTWD = cashflowFundInterest(year, month);
+                    return result;
+                };
                 const cashflowColumns = [{key:'fundTWD',label:'基金(台)'},{key:'fundUSD',label:'基金(美)'},{key:'etfTWD',label:'ETF(台)'},{key:'allianzUSD',label:'安聯(美)'},{key:'insurance',label:'保險'}];
                 const emptyCashflow = () => ({months:Object.fromEntries(Array.from({length:12},(_,i)=>[i+1,Object.fromEntries(cashflowColumns.map(c=>[c.key,'']))])),depositTWD:'',depositUSD:''});
                 const initCashflow = year => {
@@ -958,13 +968,13 @@
                 };
                 const currentCashflow = computed(() => {initCashflow(selectedYear.value);return cashflowRecords.value[selectedYear.value];});
                 const cashflowRound = n => Math.round((n + Number.EPSILON)*100)/100;
-                const cashflowMonthTotal = month => cashflowRound(cashflowColumns.reduce((n,c)=>n+Number(currentCashflow.value.months[month][c.key]||0),0));
-                const cashflowColumnTotal = key => cashflowRound(Object.values(currentCashflow.value.months).reduce((n,r)=>n+Number(r[key]||0),0));
+                const cashflowMonthTotal = month => cashflowRound(cashflowColumns.reduce((n,c)=>n+Number(cashflowCellValue(month,c.key)||0),0));
+                const cashflowColumnTotal = key => cashflowRound(Object.keys(currentCashflow.value.months).reduce((n,month)=>n+Number(cashflowCellValue(month,key)||0),0));
                 const cashflowMonthlyTotal = computed(()=>cashflowRound(cashflowColumns.reduce((n,c)=>n+cashflowColumnTotal(c.key),0)));
                 const cashflowAnnualTotal = computed(()=>cashflowRound(cashflowMonthlyTotal.value+Number(currentCashflow.value.depositTWD||0)+Number(currentCashflow.value.depositUSD||0)));
                 const saveCashflowRecord = () => {
                     if (!cashflowReady.value) {syncError.value='請先部署新版 GAS 並載入配息記錄。';return false;}
-                    for (const record of Object.values(cashflowRecords.value)) {
+                    for (const record of Object.values(cashflowSnapshot(cashflowRecords.value))) {
                         const values = [record.depositTWD,record.depositUSD,...Object.values(record.months).flatMap(row=>cashflowColumns.map(c=>row[c.key]))];
                         if (values.some(v=>v!=='' && (typeof v!=='number' || !Number.isFinite(v) || v<0))) {syncError.value='配息金額請填寫非負數字。';return false;}
                     }
@@ -1320,6 +1330,7 @@
                         const result = {};
                         for (const field in data) {
                             if (key === 'transactions' && field === 'id') continue;
+                            if (key === 'cashflowRecords' && field === 'fundTWD') continue;
                             if (key === 'summaries' && ['month', 'livingExpense'].includes(field)) continue;
                             if (key === 'assetsRecords' && ['invEntieUSD', 'currJPY', 'currUSD', 'currHKD'].includes(field)) continue;
                             const v = data[field];
@@ -1334,6 +1345,7 @@
                 };
                 const datasetDirty = Object.fromEntries(Object.keys(cleanData.value).map(key => [key, computed(() =>
                     canonical(editableSnapshot(key, datasetRefs()[key])) !== canonical(editableSnapshot(key, cleanData.value[key])))]));
+                const hasUnsavedFunds = computed(() => datasetDirty.fundsRecords.value);
                 const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
                 const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
@@ -1351,7 +1363,8 @@
                         transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
                         allSummaries.value = clone(data.summaries);
                         assetsRecords.value = clone(data.assetsRecords);
-                        if (!data.datasetErrors?.fundsRecords) fundsRecords.value = clone(data.fundsRecords);
+                        fundInterestReady.value = !data.datasetErrors?.fundsRecords;
+                        if (fundInterestReady.value) fundsRecords.value = clone(data.fundsRecords);
                         cashflowReady.value = data.protocolVersion >= 6 && !data.datasetErrors?.cashflowRecords;
                         if (cashflowReady.value) cashflowRecords.value = clone(data.cashflowRecords);
                         remoteSnapshot = clone(data);
@@ -1387,7 +1400,11 @@
                         syncError.value = '尚未成功載入雲端資料，請先重新載入，避免覆蓋既有紀錄。';
                         return false;
                     }
-                    const expected = clone(value);
+                    if (key === 'cashflowRecords') {
+                        if (!fundInterestReady.value) { syncError.value = '基金資料尚未成功載入，無法帶入利息；請重新載入雲端資料。'; return false; }
+                        if (hasUnsavedFunds.value) { syncError.value = '請先儲存基金投資，再提交配息，確保帶入利息已儲存。'; return false; }
+                    }
+                    const expected = key === 'cashflowRecords' ? cashflowSnapshot(value) : clone(value);
                     if (key === 'summaries') {
                         for (const year in expected) for (const month in expected[year]) {
                             const row = expected[year][month];
@@ -1586,7 +1603,7 @@
                 };
 
                 return {
-                    cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
+                    cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
                     activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
