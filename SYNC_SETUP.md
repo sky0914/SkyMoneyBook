@@ -48,9 +48,13 @@
 - 瀏覽器重新整理、返回或關閉時使用原生離開提示；是否顯示及提示文字由瀏覽器決定，部分行動瀏覽器關閉程式時可能不觸發。這不是自動儲存或草稿備份。
 - 搜尋限定目前選擇的月份，支援項目名稱、分類與空白分隔的多個關鍵字。不區分英文大小寫；搜尋不改變分類累計、年度摘要或寫入資料。
 
+## 存股紀錄
+
+新增「存股紀錄」頁籤，讀寫獨立的原存股試算表。欄位、型態、公式保護與部署方式請見 `STOCK_SPEC.md`。此功能需要重新部署完整 `GAS`，再更新 `index.html`。
+
 ## 驗證與限制
 
-執行 `node --test tests/sync.test.cjs` 可在不連接正式資料的情況下測試前後端同步邏輯。測試使用 SpreadsheetApp 與網路替身，不能取代 Apps Script 部署後的試算表驗證。
+執行 `node --test tests/*.test.cjs` 可在不連接正式資料的情況下測試前後端同步邏輯。測試使用 SpreadsheetApp 與網路替身，不能取代 Apps Script 部署後的試算表驗證。
 
 另有 `tests/browser-sync.cjs`，以實際 Vue 與 Chromium 測試四頁儲存、重新載入與頁面執行錯誤，但試算表服務仍為模擬。需安裝 Playwright、Vue 3 並準備 Chromium，再將 `VUE_BROWSER_BUILD` 指向 `vue/dist/vue.global.prod.js`、`CHROMIUM_PATH` 指向瀏覽器執行檔，執行 `node tests/browser-sync.cjs`。
 

@@ -93,6 +93,16 @@
         .ledger-theme thead th { color: #aebec6; font-weight: 550; letter-spacing: .03em; white-space: nowrap; }
         .ledger-theme tbody tr:hover { background-color: #23313966; }
         .ledger-theme .success-notice { background: #203b32; color: #d8eee1; border-color: #5f8f78; border-radius: 12px; box-shadow: 0 12px 32px #00000040; }
+        .ledger-theme .stock-scroll { max-width: 100%; overflow: auto; max-height: 680px; }
+        .ledger-theme .stock-table { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+        .ledger-theme .stock-table td { padding: 0; border-right: 1px solid #40505c55; border-bottom: 1px solid #40505c55; overflow: hidden; }
+        .ledger-theme .stock-table thead th { position: sticky; top: 0; z-index: 3; padding: 9px; text-align: center; background: #202f35; border-bottom: 1px solid #40505c; }
+        .ledger-theme .stock-row-label { position: sticky; left: 0; z-index: 2; color: #a3b2ba; background: #202f35; text-align: center; font-weight: 400; }
+        .ledger-theme .stock-table thead .stock-row-label { z-index: 4; }
+        .ledger-theme .stock-cell-button, .ledger-theme .stock-cell-readonly { display: block; width: 100%; min-height: 28px; padding: 5px 8px; color: inherit; text-align: inherit; font: inherit; white-space: inherit; overflow: hidden; }
+        .ledger-theme .stock-cell-button:hover { box-shadow: inset 0 0 0 1px #91b9c2; }
+        .ledger-theme .stock-cell-dirty { box-shadow: inset 0 0 0 2px #c7a969; }
+        .ledger-theme .stock-cell-input { display: block; width: 100%; min-width: 0; border: 0; border-radius: 0; color: inherit; background: transparent; padding: 5px 8px; font: inherit; text-align: inherit; }
         .ledger-theme footer { color: #8b9da6; letter-spacing: .06em; }
         .ledger-theme ::-webkit-scrollbar-track { background: #12191d; }
         .ledger-theme ::-webkit-scrollbar-thumb { background: #40525c; }
@@ -244,25 +254,28 @@
 
         <!-- ================= 功能頁籤切換 ================= -->
         <div class="ledger-tabs flex gap-2.5 mb-6 border-b border-borderCol pb-3 overflow-x-auto" role="navigation" aria-label="財務功能">
-            <button @click="activeTab = 'transactions'" :aria-current="activeTab === 'transactions' ? 'page' : null"
+            <button @click="changeTab('transactions')" :aria-current="activeTab === 'transactions' ? 'page' : null"
                 :class="activeTab === 'transactions' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-list-check"></i> 日常開銷明細
             </button>
-            <button @click="activeTab = 'summary'" :aria-current="activeTab === 'summary' ? 'page' : null"
+            <button @click="changeTab('summary')" :aria-current="activeTab === 'summary' ? 'page' : null"
                 :class="activeTab === 'summary' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-calendar-days"></i> {{ selectedYear }} 年收支摘要總表
             </button>
-            <button @click="activeTab = 'funds'" :aria-current="activeTab === 'funds' ? 'page' : null"
+            <button @click="changeTab('funds')" :aria-current="activeTab === 'funds' ? 'page' : null"
                 :class="activeTab === 'funds' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-chart-line"></i> {{ selectedYear }} 年基金投資記錄
             </button>
-            <button @click="activeTab = 'assets'" :aria-current="activeTab === 'assets' ? 'page' : null"
+            <button @click="changeTab('assets')" :aria-current="activeTab === 'assets' ? 'page' : null"
                 :class="activeTab === 'assets' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-landmark"></i> 資產負債紀錄
+            </button>
+            <button @click="changeTab('stocks')" :aria-current="activeTab === 'stocks' ? 'page' : null" :class="activeTab === 'stocks' ? 'tab-active' : 'tab-idle'" class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i aria-hidden="true" class="fa-solid fa-chart-column"></i> 存股紀錄
             </button>
         </div>
 
@@ -850,6 +863,70 @@
             </div>
         </div>
 
+        <!-- ================= 存股紀錄：原表欄位，僅更新修改的儲存格 ================= -->
+        <section v-show="activeTab === 'stocks'" class="space-y-5" aria-label="存股紀錄">
+            <div class="section-toolbar flex items-center justify-between bg-cardBg p-5 rounded-3xl border border-borderCol">
+                <div>
+                    <h2 class="text-lg font-semibold text-white"><i aria-hidden="true" class="fa-solid fa-chart-column text-accentBlue mr-2"></i>存股紀錄</h2>
+                    <p class="text-xs text-gray-400 mt-1">{{ stockWorkbook?.name || '連接你的存股試算表' }} · 原表欄位與數值格式</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <a :href="stockSourceUrl" target="_blank" rel="noopener noreferrer" class="text-xs text-accentBlue border border-borderCol px-3 py-2 rounded-xl">開啟原試算表 <i aria-hidden="true" class="fa-solid fa-arrow-up-right-from-square ml-1"></i></a>
+                    <button @click="loadStockSheet(stockSelectedSheetId, stockSheet?.startRow || 1)" :disabled="stockLoading || stockSaving" class="text-xs border border-borderCol px-3 py-2 rounded-xl">重新載入</button>
+                    <button @click="saveStockChanges" :disabled="stockLoading || stockSaving || !hasStockUnsavedChanges" class="primary-action text-xs px-4 py-2 rounded-xl">{{ stockSaving ? '儲存中…' : '儲存存股修改' }}</button>
+                </div>
+            </div>
+            <div v-if="stockError" role="alert" class="rounded-xl border border-rose-500/40 bg-rose-500/5 px-4 py-3 text-sm text-rose-300">{{ stockError }}</div>
+            <p v-if="stockNotice" role="status" class="text-sm text-accentGreen">{{ stockNotice }}</p>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <label for="stock-sheet" class="text-xs text-gray-400">工作表</label>
+                    <select v-if="stockWorkbook" id="stock-sheet" v-model.number="stockSelectedSheetId" @change="loadStockSheet(stockSelectedSheetId)" :disabled="stockLoading || stockSaving" class="bg-cardBg border border-borderCol rounded-xl px-3 py-2 text-sm max-w-[240px]">
+                        <option v-for="sheet in stockWorkbook.sheets" :key="sheet.id" :value="sheet.id">{{ sheet.name }}</option>
+                    </select>
+                </div>
+                <p class="text-xs text-gray-400">點選一般儲存格編輯 · 公式與表頭保留原樣 <span v-if="stockChangeCount" class="text-amber-400">· {{ stockChangeCount }} 格待儲存</span></p>
+            </div>
+            <div v-if="stockLoading" role="status" class="flex items-center gap-3 text-sm text-gray-300 p-5 bg-cardBg rounded-xl border border-borderCol">
+                <i aria-hidden="true" class="fa-solid fa-circle-notch animate-spin text-accentBlue"></i>讀取存股資料與欄位格式中…
+            </div>
+            <div v-if="stockSheet && stockSheet.totalRows" class="bg-cardBg rounded-3xl border border-borderCol overflow-hidden">
+                <div class="stock-scroll overflow-auto max-h-[680px]" :aria-busy="stockLoading || stockSaving">
+                    <table class="stock-table" :style="{ width: '100%', minWidth: stockSheet.columnWidths.reduce((sum, width) => sum + width, 48) + 'px' }" :aria-label="stockSheet.name">
+                        <colgroup><col style="width:48px"><col v-for="(width, index) in stockSheet.columnWidths" :key="index" :style="{ width: width + 'px' }"></colgroup>
+                        <thead><tr><th scope="col" class="stock-row-label">列</th><th v-for="(width, index) in stockSheet.columnWidths" :key="index" scope="col">{{ stockColumnName(index) }}</th></tr></thead>
+                        <tbody>
+                            <tr v-for="row in stockSheet.rows" :key="row.number" :style="{ height: row.height + 'px' }">
+                                <th scope="row" class="stock-row-label">{{ row.number }}</th>
+                                <td v-for="cell in row.cells" :key="cell.key" :colspan="cell.colspan" :rowspan="cell.rowspan" :style="stockCellStyle(cell)" :class="{ 'stock-cell-dirty': stockEdits[cell.key] }">
+                                    <template v-if="stockEditor?.key === cell.key">
+                                        <select v-if="cell.kind === 'boolean'" :ref="focusStockEditor" v-model="stockBuffer" @blur="commitStockEdit" @keydown.enter.prevent="commitStockEdit" @keydown.esc.prevent="stockEditor = null" :aria-label="'編輯 ' + stockColumnName(cell.column - 1) + row.number" class="stock-cell-input"><option value="true">是</option><option value="false">否</option></select>
+                                        <input v-else :ref="focusStockEditor" v-model="stockBuffer" :type="cell.kind === 'date' ? 'date' : 'text'" :inputmode="['number','percent'].includes(cell.kind) ? 'decimal' : 'text'" @blur="commitStockEdit" @keydown.enter.prevent="commitStockEdit" @keydown.esc.prevent="stockEditor = null" :aria-label="'編輯 ' + stockColumnName(cell.column - 1) + row.number" class="stock-cell-input">
+                                    </template>
+                                    <button v-else-if="cell.editable" @click="beginStockEdit(cell)" :disabled="stockLoading || stockSaving || stockWritePending" :aria-label="'編輯 ' + stockColumnName(cell.column - 1) + row.number + '：' + stockCellText(cell)" :title="cell.kind === 'percent' ? '百分比請輸入百分數，例如 5 代表 5%' : '點選編輯；修改後請儲存'" class="stock-cell-button">{{ stockCellText(cell) || '　' }}</button>
+                                    <span v-else :title="cell.formula ? '原試算表公式自動計算' : cell.text" class="stock-cell-readonly">{{ cell.text || '　' }}</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <p v-else-if="stockSheet && !stockLoading" class="text-sm text-gray-400 p-5 bg-cardBg rounded-xl">這個工作表目前沒有資料，可先在原試算表建立欄位與紀錄。</p>
+            <div v-if="stockSheet" class="flex flex-wrap items-center justify-between gap-3 text-xs text-gray-400">
+                <span>第 {{ stockSheet.startRow }}–{{ stockSheet.totalRows ? stockSheet.endRow : 0 }} 列／共 {{ stockSheet.totalRows }} 列 · 資料儲存於原試算表</span>
+                <div class="flex gap-2">
+                    <button @click="loadStockSheet(stockSheet.id, Math.max(1, stockSheet.startRow - stockSheet.pageRows))" :disabled="stockLoading || stockSaving || stockSheet.startRow <= 1" class="border border-borderCol rounded-lg px-3 py-2">上一頁</button>
+                    <button @click="loadStockSheet(stockSheet.id, stockSheet.endRow + 1)" :disabled="stockLoading || stockSaving || stockSheet.endRow >= stockSheet.totalRows" class="border border-borderCol rounded-lg px-3 py-2">下一頁</button>
+                </div>
+            </div>
+            <details class="text-xs text-gray-400 border border-borderCol rounded-xl p-4">
+                <summary class="cursor-pointer text-accentBlue">儲存欄位與編輯規則</summary>
+                <p class="mt-3">沿用原試算表的工作表、欄位順序與儲存格位置，只更新你修改的格子。數字存為數字，百分比輸入 5 代表原表的 5%，日期存為日期，文字保留原內容。表頭、合併儲存格與公式不直接編輯。</p>
+                <p class="mt-2">如需新增列、調整公式、圖表或版面，請開啟原試算表修改，再重新載入。切換存股工作表或頁次前，請先儲存修改。</p>
+                <ul v-if="stockSheet" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1"><li v-for="(name, index) in stockSheet.headers" :key="index">{{ stockColumnName(index) }} 欄：{{ name || '依原表內容' }}</li></ul>
+            </details>
+        </section>
+
         <!-- ================= 頁尾 ================= -->
         <footer class="mt-16 pt-6 border-t border-borderCol flex flex-col sm:flex-row justify-between items-center text-xs text-gray-500 gap-2">
             <div>個人帳本 · 明細 / 收支 / 投資 / 資產</div>
@@ -906,9 +983,9 @@
                     canonical(key === 'transactions' ? b.map(({ id, ...row }) => row) : b);
                 const normalize = value => Array.isArray(value) ? value.map(normalize) :
                     value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])])) : value;
-                const request = async (options, url = GAS_URL) => {
+                const request = async (options, url = GAS_URL, timeoutMs = 15000) => {
                     const controller = new AbortController();
-                    const timer = setTimeout(() => controller.abort(), 15000);
+                    const timer = setTimeout(() => controller.abort(), timeoutMs);
                     try { return await fetch(url, { ...options, signal: controller.signal }); }
                     finally { clearTimeout(timer); }
                 };
@@ -926,6 +1003,146 @@
                     }
                     return data;
                 };
+                const stockWorkbook = ref(null);
+                const stockSheet = ref(null);
+                const stockSelectedSheetId = ref(null);
+                const stockLoading = ref(false);
+                const stockSaving = ref(false);
+                const stockError = ref('');
+                const stockNotice = ref('');
+                const stockEdits = ref({});
+                const stockEditor = ref(null);
+                const stockBuffer = ref('');
+                const pendingStockSave = ref(null);
+                const stockValueEqual = (kind, a, b) => {
+                    if (a === '' || b === '') return a === b;
+                    if (kind === 'number' || kind === 'percent') return Number.isFinite(Number(a)) && Number.isFinite(Number(b)) && (kind === 'percent' ? Number(Number(a).toPrecision(15)) === Number(Number(b).toPrecision(15)) : Number(a) === Number(b));
+                    return String(a) === String(b);
+                };
+                const stockChangeMatches = (cell, change) => {
+                    if (!cell || cell.formula) return false;
+                    const expectedType = change.value === '' ? 'string' : ['number', 'percent'].includes(change.kind) ? 'number' : change.kind === 'boolean' ? 'boolean' : change.kind === 'date' ? 'date' : 'string';
+                    return cell.storageType === expectedType && (change.value === '' || cell.kind === change.kind) && stockValueEqual(change.kind, cell.input, change.value);
+                };
+                const stockWritePending = computed(() => !!pendingStockSave.value);
+                const hasStockUnsavedChanges = computed(() => Object.keys(stockEdits.value).length > 0 || !!pendingStockSave.value ||
+                    (!!stockEditor.value && !stockValueEqual(stockEditor.value.kind, stockBuffer.value, stockEditor.value.input)));
+                const stockChangeCount = computed(() => Object.keys(stockEdits.value).length);
+                const stockSourceUrl = computed(() => 'https://docs.google.com/spreadsheets/d/1E4Xit2DIak_aWRER_6fMbsQK0xU65cr52Rc6uUsvy6Q/edit' + (stockSheet.value ? '#gid=' + stockSheet.value.id : ''));
+                const stockColumnName = index => {
+                    let name = '';
+                    for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + (n - 1) % 26) + name;
+                    return name;
+                };
+                const commitStockEdit = () => {
+                    const cell = stockEditor.value;
+                    if (!cell) return;
+                    if (stockValueEqual(cell.kind, stockBuffer.value, cell.input)) delete stockEdits.value[cell.key];
+                    else stockEdits.value[cell.key] = { row: cell.row, column: cell.column, value: String(stockBuffer.value),
+                        expectedRevision: cell.revision, kind: cell.kind };
+                    stockEditor.value = null;
+                };
+                const beginStockEdit = cell => {
+                    if (!cell.editable || stockLoading.value || stockSaving.value || pendingStockSave.value) return;
+                    commitStockEdit();
+                    stockEditor.value = cell;
+                    stockBuffer.value = stockEdits.value[cell.key]?.value ?? cell.input;
+                };
+                const focusStockEditor = element => {
+                    if (element && document.activeElement !== element) { element.focus(); element.select?.(); }
+                };
+                const stockCellText = cell => stockEdits.value[cell.key]?.value ?? cell.text;
+                const stockCellStyle = cell => {
+                    const style = { ...cell.style };
+                    if (['#ffffff', '#fff', 'white'].includes(String(style.backgroundColor).toLowerCase())) {
+                        style.backgroundColor = '#1a2226'; style.color = '#e5ecee';
+                    }
+                    style.fontFamily = 'inherit';
+                    style.fontSize = Math.max(12, parseFloat(style.fontSize) || 12) + 'px';
+                    return style;
+                };
+                const requestStockSheet = async (sheetId, startRow, changes = []) => {
+                    const params = new URLSearchParams({ dataset: 'stockSheet', startRow: String(startRow) });
+                    if (sheetId !== null && sheetId !== undefined) params.set('sheetId', String(sheetId));
+                    if (changes.length) {
+                        params.set('minEndRow', String(Math.max(...changes.map(change => change.row))));
+                        params.set('minColumn', String(Math.max(...changes.map(change => change.column))));
+                    }
+                    const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' }, GAS_URL + '?' + params, 60000);
+                    if (!res.ok) throw new Error('存股資料讀取失敗（HTTP ' + res.status + '）');
+                    const data = await res.json();
+                    if (data.status === 'error') throw new Error(String(data.message || '').includes('Unknown dataset') ? '請先部署支援存股紀錄的新版 GAS，再重新載入' : data.message || '請確認存股試算表的存取權限');
+                    if (!data.stockWorkbook || !data.stockSheet || !Array.isArray(data.stockSheet.rows) || !Array.isArray(data.stockWorkbook.sheets)) {
+                        throw new Error('請先部署支援存股紀錄的新版 GAS，再重新載入');
+                    }
+                    return data;
+                };
+                const loadStockSheet = async (sheetId = stockSelectedSheetId.value, startRow = 1) => {
+                    if (stockLoading.value || stockSaving.value) return;
+                    commitStockEdit();
+                    if (hasStockUnsavedChanges.value && !confirm('存股頁面有尚未儲存的修改。重新載入或切換工作表／頁次會放棄這些修改，確定繼續？')) {
+                        stockSelectedSheetId.value = stockSheet.value?.id ?? null; return;
+                    }
+                    stockLoading.value = true; stockError.value = ''; stockNotice.value = '';
+                    try {
+                        const data = await requestStockSheet(sheetId, startRow);
+                        stockWorkbook.value = data.stockWorkbook; stockSheet.value = data.stockSheet;
+                        stockSelectedSheetId.value = data.stockSheet.id;
+                        stockEdits.value = {}; pendingStockSave.value = null;
+                    } catch (err) {
+                        stockSelectedSheetId.value = stockSheet.value?.id ?? null;
+                        stockError.value = err.name === 'AbortError' ? '存股資料讀取逾時，請稍後重新載入。' : err.message;
+                    } finally { stockLoading.value = false; }
+                };
+                const saveStockChanges = async () => {
+                    if (stockLoading.value || stockSaving.value || !stockSheet.value) return;
+                    commitStockEdit();
+                    const changes = Object.values(stockEdits.value).map(change => ({ ...change }));
+                    if (!changes.length) return;
+                    if (changes.some(change => (['number', 'percent'].includes(change.kind) && change.value !== '' && (!change.value.trim() || !Number.isFinite(Number(change.value)))) ||
+                        (change.kind === 'date' && change.value !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(change.value)))) {
+                        stockError.value = '請確認修改的數字或日期。數字不需輸入千分位或貨幣符號，日期使用 YYYY-MM-DD。'; return;
+                    }
+                    const sheetId = stockSheet.value.id, startRow = stockSheet.value.startRow;
+                    const matches = data => {
+                        const cells = Object.fromEntries(data.stockSheet.rows.flatMap(row => row.cells).map(cell => [cell.key, cell]));
+                        return changes.every(change => stockChangeMatches(cells[change.row + ':' + change.column], change));
+                    };
+                    const isRetry = !!pendingStockSave.value;
+                    pendingStockSave.value = { sheetId, changes };
+                    stockSaving.value = true; stockError.value = ''; stockNotice.value = '正在儲存存股資料…';
+                    try {
+                        let confirmed = isRetry ? await requestStockSheet(sheetId, startRow, changes) : null;
+                        if (!confirmed || !matches(confirmed)) {
+                            await request({ method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                body: JSON.stringify({ action: 'saveStockCells', sheetId, changes }) }, GAS_URL, 60000);
+                            confirmed = null;
+                            for (let attempt = 0; attempt < 3; attempt++) {
+                                const data = await requestStockSheet(sheetId, startRow, changes);
+                                if (matches(data)) { confirmed = data; break; }
+                                const cells = Object.fromEntries(data.stockSheet.rows.flatMap(row => row.cells).map(cell => [cell.key, cell]));
+                                if (changes.some(change => !cells[change.row + ':' + change.column] ||
+                                    (cells[change.row + ':' + change.column].revision !== change.expectedRevision &&
+                                        !stockChangeMatches(cells[change.row + ':' + change.column], change)))) {
+                                    throw new Error('原試算表資料已變更，請先保留你的修改，再重新載入。');
+                                }
+                                if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+                            }
+                        }
+                        if (!confirmed) throw new Error('讀回的存股資料尚未符合修改內容，無法確認儲存成功。');
+                        stockSheet.value = confirmed.stockSheet; stockWorkbook.value = confirmed.stockWorkbook;
+                        stockEdits.value = {}; pendingStockSave.value = null;
+                        stockNotice.value = '已讀回原試算表，確認修改已儲存。';
+                    } catch (err) {
+                        stockNotice.value = '';
+                        stockError.value = (err.name === 'AbortError' ? '儲存逾時，無法確認結果。' : err.message) + ' 修改仍保留在本頁，請勿關閉。可重試儲存，或先保留修改後重新載入。';
+                    } finally { stockSaving.value = false; }
+                };
+                const changeTab = tab => {
+                    activeTab.value = tab;
+                    if (tab === 'stocks' && !stockSheet.value && !stockLoading.value) loadStockSheet();
+                };
+
                 const reportFailure = err => {
                     syncStatus.value = '同步未完成';
                     syncError.value = (err.name === 'AbortError' ? '連線逾時，無法確認儲存結果' : err.message || '網路連線失敗') + '。目前頁面的修改仍保留，請勿關閉或重新整理瀏覽器。';
@@ -1290,14 +1507,14 @@
                 };
                 const datasetDirty = Object.fromEntries(Object.keys(cleanData.value).map(key => [key, computed(() =>
                     canonical(editableSnapshot(key, datasetRefs()[key])) !== canonical(editableSnapshot(key, cleanData.value[key])))]));
-                const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
-                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資' };
+                const dirtySections = computed(() => [...Object.keys(datasetDirty).filter(key => datasetDirty[key].value), ...(hasStockUnsavedChanges.value ? ['stockRecords'] : [])]);
+                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', stockRecords: '存股紀錄' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
                 const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value);
 
                 const fetchData = async () => {
                     if (isSubmitting.value) return;
-                    if (hasUnsavedChanges.value && !confirm('有尚未儲存的修改。重新載入會以雲端資料取代目前內容，確定要放棄修改？')) return;
+                    if ((dirtySections.value.some(key => key !== 'stockRecords') || hasUnsavedForm.value || pendingSave.value) && !confirm('有尚未儲存的修改。重新載入會以雲端資料取代目前內容，確定要放棄修改？')) return;
                     isSubmitting.value = true;
                     syncError.value = '';
                     showSuccessToast.value = false;
@@ -1411,7 +1628,7 @@
                     }
                 };
                 window.addEventListener('beforeunload', event => {
-                    if (hasUnsavedChanges.value || isSubmitting.value) { event.preventDefault(); event.returnValue = ''; }
+                    if (hasUnsavedChanges.value || isSubmitting.value || stockSaving.value) { event.preventDefault(); event.returnValue = ''; }
                 });
 
                 onMounted(() => {
@@ -1538,7 +1755,10 @@
                 };
 
                 return {
-                    activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
+                    activeTab, changeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
+                    stockWorkbook, stockSheet, stockSelectedSheetId, stockLoading, stockSaving, stockError, stockNotice,
+                    stockEdits, stockEditor, stockBuffer, hasStockUnsavedChanges, stockChangeCount, stockSourceUrl,
+                    stockWritePending, stockColumnName, beginStockEdit, commitStockEdit, focusStockEditor, stockCellText, stockCellStyle, loadStockSheet, saveStockChanges,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
                     hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,

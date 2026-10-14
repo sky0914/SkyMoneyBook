@@ -142,8 +142,9 @@ function read_(ss, key) {
 function doGet(e) {
   var lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
     var key = e && e.parameter && e.parameter.dataset;
+    if (key === 'stockSheet') return json_(readStock_(e.parameter));
+    lock.waitLock(10000);
     if (key && ['transactions','summaries','assetsRecords','fundsRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
     return json_(read_(SpreadsheetApp.openById(BOOK_ID), key));
   } catch (err) { return json_({status: 'error', message: String(err)}); }
@@ -173,6 +174,10 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
     var payload = JSON.parse(e.postData.contents);
+    if (payload.action === 'saveStockCells') {
+      lock.waitLock(10000);
+      return json_(saveStock_(payload));
+    }
     var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords'};
     var key = actions[payload.action];
     if (!key || typeof payload.expectedRevision !== 'string') throw new Error('Unsupported action or missing revision; reload the updated webpage');
@@ -228,4 +233,152 @@ function doPost(e) {
     return json_({status: 'success'});
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
+}
+
+
+// Stock records stay in their original workbook, worksheet and cell positions.
+var STOCK_BOOK_ID = '1E4Xit2DIak_aWRER_6fMbsQK0xU65cr52Rc6uUsvy6Q';
+var STOCK_PAGE_ROWS = 80;
+function stockVisibleSheets_(ss) {
+  return ss.getSheets().filter(function(sheet) { return !sheet.isSheetHidden(); });
+}
+function stockSheet_(ss, id) {
+  var sheets = stockVisibleSheets_(ss);
+  var sheet = id === undefined || id === null || id === '' ? sheets[0] : sheets.filter(function(s) { return s.getSheetId() === Number(id); })[0];
+  if (!sheet) throw new Error('找不到可使用的存股工作表');
+  return sheet;
+}
+function stockKind_(value, format) {
+  var cleaned = String(format || '').replace(/"[^"]*"|\[[^\]]*\]|\\./g, '');
+  if (value instanceof Date || ((value === '' || value === null) && /y|d|m{2,}/i.test(cleaned))) return 'date';
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'number' || /[0#?]/.test(cleaned)) return cleaned.indexOf('%') >= 0 ? 'percent' : 'number';
+  return 'text';
+}
+function stockRaw_(value, timezone) {
+  return value instanceof Date ? {dateTime: value.toISOString()} : value;
+}
+function stockCell_(row, column, raw, text, formula, format, timezone) {
+  var kind = stockKind_(raw, format), input = raw;
+  if (raw instanceof Date) input = Utilities.formatDate(raw, timezone, 'yyyy-MM-dd');
+  else if (kind === 'percent' && typeof raw === 'number') input = Number((raw * 100).toPrecision(15));
+  return {row: row, column: column, key: row + ':' + column, text: String(text || ''),
+    kind: kind, storageType: raw instanceof Date ? 'date' : typeof raw, input: input === null ? '' : String(input), formula: !!formula,
+    revision: revision_({value: stockRaw_(raw, timezone), formula: formula || '', format: format || ''})};
+}
+function readStock_(parameters) {
+  var ss = SpreadsheetApp.openById(STOCK_BOOK_ID), sheet = stockSheet_(ss, parameters.sheetId);
+  var contentRows = sheet.getLastRow(), contentColumns = sheet.getLastColumn();
+  var minEndRow = Number(parameters.minEndRow || 0), minColumn = Number(parameters.minColumn || 0);
+  if (!Number.isInteger(minEndRow) || minEndRow < 0 || minEndRow > sheet.getMaxRows() || !Number.isInteger(minColumn) || minColumn < 0 || minColumn > sheet.getMaxColumns()) throw new Error('無效的存股確認範圍');
+  var totalRows = Math.max(contentRows, minEndRow), columns = Math.max(1, contentColumns, minColumn);
+  if (columns > 200) throw new Error('存股工作表超過 200 欄，請先確認需要顯示的範圍');
+  var start = Number(parameters.startRow || 1);
+  if (!Number.isInteger(start) || start < 1) throw new Error('無效的存股讀取範圍');
+  start = Math.min(start, Math.max(1, totalRows));
+  var count = Math.min(STOCK_PAGE_ROWS, Math.max(1, totalRows - start + 1));
+  var range = sheet.getRange(start, 1, count, columns), timezone = ss.getSpreadsheetTimeZone();
+  var mergedRanges = range.getMergedRanges();
+  mergedRanges.forEach(function(merge) {
+    columns = Math.max(columns, merge.getColumn() + merge.getNumColumns() - 1);
+    totalRows = Math.max(totalRows, merge.getRow() + merge.getNumRows() - 1);
+  });
+  if (columns > 200) throw new Error('存股合併範圍超過 200 欄');
+  count = Math.min(STOCK_PAGE_ROWS, Math.max(1, totalRows - start + 1));
+  range = sheet.getRange(start, 1, count, columns);
+  var raw = range.getValues(), display = range.getDisplayValues(), formulas = range.getFormulas(), formats = range.getNumberFormats();
+  var backgrounds = range.getBackgrounds(), colors = range.getFontColors(), weights = range.getFontWeights();
+  var fonts = range.getFontFamilies(), sizes = range.getFontSizes(), italics = range.getFontStyles();
+  var alignments = range.getHorizontalAlignments(), verticals = range.getVerticalAlignments(), wraps = range.getWraps();
+  var frozen = sheet.getFrozenRows(), headerRow = Math.max(1, frozen);
+  var headers = sheet.getRange(headerRow, 1, 1, columns).getDisplayValues()[0];
+  var merges = mergedRanges.map(function(merge) {
+    var first = Math.max(start, merge.getRow()), last = Math.min(start + count - 1, merge.getRow() + merge.getNumRows() - 1);
+    return {row: first, column: merge.getColumn(), rows: last - first + 1, columns: merge.getNumColumns(),
+      text: merge.getCell(1, 1).getDisplayValue()};
+  });
+  var rows = [], widths = [];
+  for (var c = 1; c <= columns; c++) widths.push(sheet.getColumnWidth(c));
+  for (var r = 0; r < count; r++) {
+    var cells = [];
+    for (var c = 0; c < columns; c++) {
+      var actualRow = start + r, actualColumn = c + 1;
+      var merge = merges.filter(function(m) { return actualRow >= m.row && actualRow < m.row + m.rows && actualColumn >= m.column && actualColumn < m.column + m.columns; })[0];
+      if (merge && (actualRow !== merge.row || actualColumn !== merge.column)) continue;
+      var cell = stockCell_(actualRow, actualColumn, raw[r][c], display[r][c], formulas[r][c], formats[r][c], timezone);
+      cell.rowspan = merge ? merge.rows : 1; cell.colspan = merge ? merge.columns : 1;
+      if (merge) cell.text = merge.text;
+      cell.editable = actualRow > headerRow && actualRow <= contentRows && actualColumn <= contentColumns && !cell.formula && !merge;
+      cell.style = {backgroundColor: backgrounds[r][c], color: colors[r][c], fontWeight: weights[r][c],
+        fontStyle: italics[r][c], fontSize: sizes[r][c] + 'px', fontFamily: fonts[r][c] + ', sans-serif',
+        textAlign: ['left','center','right'].indexOf(alignments[r][c]) >= 0 ? alignments[r][c] : typeof raw[r][c] === 'number' ? 'right' : 'left',
+        verticalAlign: verticals[r][c] || 'middle', whiteSpace: wraps[r][c] ? 'pre-wrap' : 'pre'};
+      cells.push(cell);
+    }
+    rows.push({number: start + r, height: sheet.getRowHeight(start + r), cells: cells});
+  }
+  return {protocolVersion: 4, stockWorkbook: {name: ss.getName(), sheets: stockVisibleSheets_(ss).map(function(s) { return {id: s.getSheetId(), name: s.getName()}; })},
+    stockSheet: {id: sheet.getSheetId(), name: sheet.getName(), startRow: start, endRow: start + count - 1,
+      totalRows: totalRows, pageRows: STOCK_PAGE_ROWS, columnWidths: widths, headers: headers, rows: rows}};
+}
+function stockNewValue_(cell, value, timezone, previous) {
+  if (typeof value !== 'string') throw new Error('無效的存股儲存值');
+  if (value === '') return '';
+  if (cell.kind === 'date') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('日期請使用 YYYY-MM-DD');
+    var date = previous instanceof Date ? Utilities.parseDate(value + ' ' + Utilities.formatDate(previous, timezone, 'HH:mm:ss.SSS'), timezone, 'yyyy-MM-dd HH:mm:ss.SSS') : Utilities.parseDate(value, timezone, 'yyyy-MM-dd');
+    if (Utilities.formatDate(date, timezone, 'yyyy-MM-dd') !== value) throw new Error('無效的日期');
+    return date;
+  }
+  if (cell.kind === 'number' || cell.kind === 'percent') {
+    if (!value.trim() || !isFinite(Number(value))) throw new Error('請輸入有效的數字');
+    return Number(value) / (cell.kind === 'percent' ? 100 : 1);
+  }
+  if (cell.kind === 'boolean') {
+    if (value !== 'true' && value !== 'false') throw new Error('無效的布林值');
+    return value === 'true';
+  }
+  // Preserve text literally; an entered '=' must not become a spreadsheet formula.
+  return value.charAt(0) === '=' || value.charAt(0) === "'" ? "'" + value : value;
+}
+function saveStock_(payload) {
+  if (!Number.isInteger(payload.sheetId) || !Array.isArray(payload.changes) || !payload.changes.length || payload.changes.length > 1000) throw new Error('無效的存股儲存要求');
+  var ss = SpreadsheetApp.openById(STOCK_BOOK_ID), sheet = stockSheet_(ss, payload.sheetId), timezone = ss.getSpreadsheetTimeZone();
+  var headerRow = Math.max(1, sheet.getFrozenRows()), maximumRow = sheet.getLastRow(), maximumColumn = sheet.getLastColumn();
+  var seen = {}, firstRow = Infinity, lastRow = 0, firstColumn = Infinity, lastColumn = 0;
+  payload.changes.forEach(function(change) {
+    var key = change.row + ':' + change.column;
+    if (!Number.isInteger(change.row) || !Number.isInteger(change.column) || change.row <= headerRow || change.row > maximumRow || change.column < 1 || change.column > maximumColumn || typeof change.expectedRevision !== 'string' || typeof change.value !== 'string' || seen[key]) throw new Error('存股儲存位置或欄位無效');
+    seen[key] = true; firstRow = Math.min(firstRow, change.row); lastRow = Math.max(lastRow, change.row);
+    firstColumn = Math.min(firstColumn, change.column); lastColumn = Math.max(lastColumn, change.column);
+  });
+  if ((lastRow - firstRow + 1) * (lastColumn - firstColumn + 1) > 30000) throw new Error('請分批儲存存股資料');
+  var range = sheet.getRange(firstRow, firstColumn, lastRow - firstRow + 1, lastColumn - firstColumn + 1);
+  var raw = range.getValues(), formulas = range.getFormulas(), formats = range.getNumberFormats(), merges = range.getMergedRanges();
+  var updates = [];
+  payload.changes.forEach(function(change) {
+    if (merges.some(function(m) { return change.row >= m.getRow() && change.row < m.getRow() + m.getNumRows() && change.column >= m.getColumn() && change.column < m.getColumn() + m.getNumColumns(); })) throw new Error('合併儲存格不直接編輯');
+    var r = change.row - firstRow, c = change.column - firstColumn;
+    var cell = stockCell_(change.row, change.column, raw[r][c], '', formulas[r][c], formats[r][c], timezone);
+    if (cell.formula) throw new Error('公式欄位由試算表自動計算，不能直接覆寫');
+    if (change.kind && change.kind !== cell.kind && !(change.value === '' && raw[r][c] === '')) throw new Error('原儲存格型態已變更，請重新載入');
+    var value = stockNewValue_(cell, change.value, timezone, raw[r][c]);
+    var literalValue = cell.kind === 'text' && (change.value.charAt(0) === '=' || change.value.charAt(0) === "'") ? change.value : value;
+    if (cell.revision !== change.expectedRevision) {
+      if (canonical_(stockRaw_(raw[r][c], timezone)) === canonical_(stockRaw_(literalValue, timezone))) return;
+      throw new Error('存股資料已在試算表中修改，請先保留網頁修改，再重新載入');
+    }
+    updates.push({row: change.row, column: change.column, value: value});
+  });
+  // Validate the entire patch before writing. Never clear/rewrite a sheet or a formula.
+  updates.sort(function(a,b) { return a.row - b.row || a.column - b.column; });
+  var groups = [];
+  updates.forEach(function(update) {
+    var group = groups[groups.length - 1];
+    if (group && group.row === update.row && group.column + group.values.length === update.column) group.values.push(update.value);
+    else groups.push({row: update.row, column: update.column, values: [update.value]});
+  });
+  groups.forEach(function(group) { sheet.getRange(group.row, group.column, 1, group.values.length).setValues([group.values]); });
+  SpreadsheetApp.flush();
+  return {status: 'success'};
 }

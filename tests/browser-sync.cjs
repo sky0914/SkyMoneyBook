@@ -3,8 +3,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {chromium}=require('playwright');
 const {backend}=require('./helpers.cjs');
+const {stockFixture}=require('./stock-fixture.cjs');
 (async()=>{
- const api=backend();
+ const api=backend();const stock=stockFixture();api.setStockWorkbook(stock.workbook);
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
  try {
   const page=await browser.newPage();const errors=[];
@@ -14,7 +15,7 @@ const {backend}=require('./helpers.cjs');
   await page.route('**/*',async route=>{
    const req=route.request(),url=req.url();
    if(url.includes('/macros/s/')) {
-    const data=req.method()==='POST'?api.post(JSON.parse(req.postData())):api.read(new URL(url).searchParams.get('dataset'));
+    const data=req.method()==='POST'?api.post(JSON.parse(req.postData())):api.read(new URL(url).searchParams.get('dataset'),Object.fromEntries(new URL(url).searchParams));
     return route.fulfill({contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify(data)});
    }
    if(url.includes('unpkg.com'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(process.env.VUE_BROWSER_BUILD,'utf8')});
@@ -69,5 +70,24 @@ const {backend}=require('./helpers.cjs');
   page.removeAllListeners('dialog');page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'取消',exact:true}).click();
   assert.equal(await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.hasUnsavedChanges),false);
   console.log('Modal discard confirmation and beforeunload protection passed');
+  await page.getByRole('button',{name:'存股紀錄',exact:true}).click();
+  await page.getByRole('table',{name:'ETF 存股',exact:true}).waitFor();
+  await page.getByRole('button',{name:'編輯 C2：1,000',exact:true}).click();
+  await page.getByRole('textbox',{name:'編輯 C2',exact:true}).fill('2000');
+  await page.getByRole('textbox',{name:'編輯 C2',exact:true}).press('Enter');
+  await page.getByText(/尚未儲存：存股紀錄/).waitFor();
+  await page.getByRole('button',{name:'儲存存股修改',exact:true}).click();
+  await page.getByText('已讀回原試算表，確認修改已儲存。',{exact:true}).waitFor();
+  assert.equal(stock.rows[1][2],2000);await page.locator('.stock-table').getByText('61,000',{exact:true}).waitFor();
+  assert.equal(await page.getByText(/尚未儲存：存股紀錄/).count(),0);
+  await page.getByRole('button',{name:'編輯 E2：5.00%',exact:true}).click();
+  await page.getByRole('textbox',{name:'編輯 E2',exact:true}).fill('4.5');
+  await page.getByRole('textbox',{name:'編輯 E2',exact:true}).press('Enter');
+  await page.getByRole('button',{name:'儲存存股修改',exact:true}).click();
+  await page.locator('.stock-table').getByText('4.50%',{exact:true}).waitFor();assert.equal(stock.rows[1][4],.045);
+  await page.getByLabel('工作表',{exact:true}).selectOption('202');
+  await page.getByRole('table',{name:'股票存股',exact:true}).waitFor();
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  console.log('Stock worksheet editing, percent conversion, formulas, switching and mobile layout passed');
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});
