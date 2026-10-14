@@ -93,6 +93,21 @@
         .ledger-theme .cashflow-table tbody td:has(input), .ledger-theme .cashflow-table tfoot td:has(input) { padding: 0; }
         .ledger-theme .cashflow-table th:first-child { width: 80px; white-space: nowrap; }
         .ledger-theme .cashflow-table input { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; min-height: 28px; text-align: center; }
+        .ledger-theme .stocks-layout { display: grid; grid-template-columns: minmax(0, 35fr) minmax(0, 48fr) minmax(0, 17fr); gap: 16px; align-items: start; }
+        .ledger-theme .stocks-left, .ledger-theme .stocks-monthly, .ledger-theme .stocks-refunds { min-width: 0; }
+        .ledger-theme .stock-table { width: 100%; min-width: 0; table-layout: fixed; text-align: center; }
+        .ledger-theme .stocks-left .stock-table { min-width: 320px; }
+        .ledger-theme .stock-table th, .ledger-theme .stock-table td { white-space: nowrap; }
+        .ledger-theme .stock-table th:first-child { width: auto; }
+        .ledger-theme .stocks-left .stock-table th:first-child { width: 22%; }
+        .ledger-theme .stock-table tbody tr { height: 28px; }
+        .ledger-theme .stock-month-table { min-width: 440px; }
+        .ledger-theme .stock-month-table input { width: 100%; min-width: 0; background: transparent; font: inherit; outline: none; }
+        .ledger-theme .stock-month-table td:first-child input[type="date"] { cursor: pointer; }
+        .ledger-theme .stock-month-table input:focus { background: #f5f6f0; }
+        @media (max-width: 960px) {
+            .ledger-theme .stocks-layout { grid-template-columns: minmax(0, 1fr); }
+        }
         .ledger-theme .transaction-table { min-width: 640px; }
         .ledger-theme .transaction-table td:first-child { white-space: nowrap; }
         .ledger-theme table.text-xs { min-width: 900px; }
@@ -314,8 +329,96 @@
 
         <!-- ================= 頁籤：股票 ================= -->
         <section v-show="activeTab === 'stocks'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
-            <h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年股票投資記錄</h2>
-            <p class="text-sm text-gray-400 mt-2">尚無股票記錄。</p>
+            <nav class="flex gap-2 mb-4" aria-label="股票代碼">
+                <button v-for="code in ['00878', '00919']" :key="code" @click="activeStockCode = code" :aria-current="activeStockCode === code ? 'page' : null" :class="activeStockCode === code ? 'tab-active' : 'tab-idle'" class="px-4 py-2 rounded-xl text-sm font-medium transition border cursor-pointer">{{ code }}</button>
+            </nav>
+            <div class="stocks-layout">
+            <div class="stocks-left space-y-4">
+            <div>
+                <h2 id="stock-record-title" class="text-lg font-semibold text-white mb-3">{{ activeStockCode }} 定期定額</h2>
+                <div class="cashflow-scroll overflow-x-auto">
+                    <table class="stock-table cashflow-table w-full text-sm border-collapse" aria-labelledby="stock-record-title">
+                        <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">時間</th><th scope="col" class="border border-borderCol">購入數量</th><th scope="col" class="border border-borderCol">購入價格</th><th scope="col" class="border border-borderCol">手續費</th><th scope="col" class="border border-borderCol">股價</th></tr></thead>
+                        <tbody>
+                            <tr v-for="row in stockDisplayRows" :key="row.month">
+                                <th scope="row" class="border border-borderCol font-normal">{{ row.month }}月定期</th>
+                                <td class="border border-borderCol font-mono">{{ row.quantity === null ? '' : row.quantity.toFixed(3) }}</td>
+                                <td class="border border-borderCol font-mono">{{ row.purchase === null ? '' : formatMoney(row.purchase) }}</td>
+                                <td class="border border-borderCol font-mono">{{ row.fee === null ? '' : formatMoney(row.fee) }}</td>
+                                <td class="border border-borderCol font-mono"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div>
+                <h2 id="stock-manual-title" class="text-lg font-semibold text-white mb-3">{{ activeStockCode }} 手動下單</h2>
+                <div class="cashflow-scroll overflow-x-auto">
+                    <table class="stock-table cashflow-table w-full text-sm border-collapse" aria-labelledby="stock-manual-title">
+                        <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">時間</th><th scope="col" class="border border-borderCol">購入數量</th><th scope="col" class="border border-borderCol">購入價格</th><th scope="col" class="border border-borderCol">手續費</th><th scope="col" class="border border-borderCol">股價</th></tr></thead>
+                        <tbody>
+                            <tr v-for="(row, index) in stockManualDisplayRows" :key="index">
+                                <th scope="row" class="border border-borderCol font-normal">{{ row.date }}</th>
+                                <td class="border border-borderCol font-mono">{{ row.quantity === null ? '' : row.quantity.toFixed(3) }}</td>
+                                <td class="border border-borderCol font-mono">{{ row.purchase === null ? '' : formatMoney(row.purchase) }}</td>
+                                <td class="border border-borderCol font-mono">{{ row.fee === null ? '' : formatMoney(row.fee) }}</td>
+                                <td class="border border-borderCol font-mono">{{ row.price === null ? '' : row.price.toFixed(2) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            </div>
+            <div class="stocks-monthly">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h2 id="stock-month-title" class="text-lg font-semibold text-white">{{ activeStockCode }} 單月定期定額</h2>
+                    <label class="flex items-center gap-2 text-sm text-gray-400">
+                        月份
+                        <select v-model.number="selectedStockMonth" aria-label="股票明細月份" class="bg-darkBg border border-borderCol rounded-xl px-3 py-1 text-sm">
+                            <option v-for="month in 12" :key="month" :value="month">{{ month }} 月</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="text-xs text-gray-400 mb-3">定期日期：1 / 3 / 5 / 7 / 9 / 11 / 13 / 15 / 17 / 19 / 21 / 23 / 25 / 27 / 29</p>
+                <div class="cashflow-scroll overflow-x-auto">
+                    <table class="stock-table stock-month-table cashflow-table text-sm border-collapse" aria-labelledby="stock-month-title">
+                        <colgroup><col style="width:30%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:20%"></colgroup>
+                        <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">時間</th><th scope="col" class="border border-borderCol">股數</th><th scope="col" class="border border-borderCol">購入價格</th><th scope="col" class="border border-borderCol">手續費</th><th scope="col" class="border border-borderCol">單價</th></tr></thead>
+                        <tbody>
+                            <tr v-for="(row, index) in stockMonthlyRows" :key="index">
+                                <td class="border border-borderCol"><input type="date" :value="stockDateInputValue(row.date)" @input="row.date = $event.target.value" @click="openStockDatePicker" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆時間'" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="1" v-model.number="row.shares" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆股數'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input type="number" readonly :value="stockPurchase(row)" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆購入價格'" placeholder="—" title="自動計算：INT(股數 × 單價)" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.fee" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆手續費'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.price" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆單價'" placeholder="—" class="text-center"></td>
+                            </tr>
+                        </tbody>
+                        <tfoot><tr class="bg-darkBg font-semibold">
+                            <th scope="row" class="border border-borderCol">合計</th>
+                            <td class="border border-borderCol font-mono">{{ formatMoney(stockMonthlyTotals.shares) }}</td>
+                            <td class="border border-borderCol font-mono">{{ formatMoney(stockMonthlyTotals.purchase) }}</td>
+                            <td class="border border-borderCol font-mono">{{ formatMoney(stockMonthlyTotals.fee) }}</td>
+                            <td class="border border-borderCol"></td>
+                        </tr></tfoot>
+                    </table>
+                </div>
+            </div>
+            <div class="stocks-refunds">
+                <h2 id="stock-refund-title" class="text-lg font-semibold text-white mb-3">全年退手續費</h2>
+                <div class="cashflow-scroll overflow-x-auto">
+                    <table class="stock-table cashflow-table text-sm border-collapse" aria-labelledby="stock-refund-title">
+                        <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">月份</th><th scope="col" class="border border-borderCol">退手續費</th></tr></thead>
+                        <tbody>
+                            <tr v-for="(amount, index) in stockRefundAmounts" :key="index">
+                                <th scope="row" class="border border-borderCol font-normal">{{ index + 1 }}</th>
+                                <td class="border border-borderCol font-mono">{{ amount === null ? '' : formatMoney(amount) }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot><tr class="bg-darkBg font-semibold"><th scope="row" class="border border-borderCol">總計退費</th><td class="border border-borderCol font-mono">{{ formatMoney(stockRefundTotal) }}</td></tr></tfoot>
+                    </table>
+                </div>
+            </div>
+            </div>
         </section>
 
         <!-- ================= 頁籤：定存 ================= -->
@@ -945,6 +1048,75 @@
         createApp({
             setup() {
                 const activeTab = ref('transactions')
+                // Read-only reference values transcribed from the supplied 00878 table.
+                // No year or cloud dataset has been assigned to this display yet.
+                const stockInitialRegularRows = [
+                    { month: 1, quantity: 0.371, purchase: 8345, fee: 180 },
+                    { month: 2, quantity: 0.322, purchase: 7518, fee: 160 },
+                    { month: 3, quantity: 0.532, purchase: 11913, fee: 240 },
+                    { month: 4, quantity: 0.476, purchase: 11322, fee: 220 },
+                    { month: 5, quantity: 0.502, purchase: 14115, fee: 260 },
+                    { month: 6, quantity: 0.512, purchase: 16775, fee: 300 },
+                    { month: 7, quantity: 0.506, purchase: 16614, fee: 300 },
+                    { month: 8, quantity: 0.507, purchase: 16694, fee: 300 },
+                    { month: 9, quantity: 0.483, purchase: 16648, fee: 300 },
+                    { month: 10, quantity: 0, purchase: null, fee: null },
+                    { month: 11, quantity: null, purchase: null, fee: null },
+                    { month: 12, quantity: null, purchase: null, fee: null }
+                ];
+                const stockInitialManualRows = [
+                    { date: '3/31', quantity: 0.500, purchase: 10905, fee: 20, price: 21.81 },
+                    { date: '7/28', quantity: 0.500, purchase: 15800, fee: 22, price: 31.60 },
+                    ...Array.from({ length: 10 }, () => ({ date: '', quantity: null, purchase: null, fee: null, price: null }))
+                ];
+                const currentStockMonth = () => Number(new Intl.DateTimeFormat('en-US', { month: 'numeric', timeZone: 'Asia/Taipei' }).format(new Date()));
+                const emptyStockMonths = () => Object.fromEntries(Array.from({ length: 12 }, (_, index) => [index + 1,
+                    Array.from({ length: 15 }, () => ({ date: '', shares: null, fee: null, price: null }))
+                ]));
+                const activeStockCode = ref('00878');
+                const stockRecords = ref({
+                    '00878': { regularRows: stockInitialRegularRows, manualRows: stockInitialManualRows,
+                        refundAmounts: [171, 152, 228, 209, 247, 285, 285, 285, 285, 133, null, null], monthlyRecords: emptyStockMonths() },
+                    '00919': {
+                        regularRows: Array.from({ length: 12 }, (_, index) => ({ month: index + 1, quantity: null, purchase: null, fee: null })),
+                        manualRows: Array.from({ length: 12 }, () => ({ date: '', quantity: null, purchase: null, fee: null, price: null })),
+                        refundAmounts: Array(12).fill(null), monthlyRecords: emptyStockMonths()
+                    }
+                });
+                const currentStockRecord = computed(() => stockRecords.value[activeStockCode.value]);
+                const stockDisplayRows = computed(() => currentStockRecord.value.regularRows);
+                const stockManualDisplayRows = computed(() => currentStockRecord.value.manualRows);
+                const stockRefundAmounts = computed(() => currentStockRecord.value.refundAmounts);
+                const stockRefundTotal = computed(() => stockRefundAmounts.value.reduce((total, amount) => total + (amount ?? 0), 0));
+                const selectedStockMonth = ref(currentStockMonth());
+                watch(activeTab, tab => { if (tab === 'stocks') selectedStockMonth.value = currentStockMonth(); });
+                watch(activeStockCode, () => { selectedStockMonth.value = currentStockMonth(); });
+                const stockMonthlyRows = computed(() => currentStockRecord.value.monthlyRecords[selectedStockMonth.value]);
+                const stockDateInputValue = date => {
+                    if (!date) return '';
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+                    const match = /^(\d{1,2})\/(\d{1,2})$/.exec(date);
+                    return match ? selectedYear.value + '-' + match[1].padStart(2, '0') + '-' + match[2].padStart(2, '0') : '';
+                };
+                const openStockDatePicker = event => {
+                    if (typeof event.target.showPicker === 'function') {
+                        try { event.target.showPicker(); } catch { /* Keep the browser's normal date control usable. */ }
+                    }
+                };
+                const stockInputNumber = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+                const stockInputRound = value => Math.round((value + Number.EPSILON) * 100) / 100;
+                const stockPurchase = row => {
+                    if ([row.shares, row.price].some(value => value === null || value === undefined || value === '')) return '';
+                    const product = Number(row.shares) * Number(row.price);
+                    if (!Number.isFinite(product)) return '';
+                    // Remove binary floating-point noise before applying INT (floor).
+                    return Math.floor(Number(product.toPrecision(15)));
+                };
+                const stockMonthlyTotals = computed(() => stockMonthlyRows.value.reduce((total, row) => ({
+                    shares: total.shares + stockInputNumber(row.shares),
+                    purchase: total.purchase + stockInputNumber(stockPurchase(row)),
+                    fee: stockInputRound(total.fee + stockInputNumber(row.fee))
+                }), { shares: 0, purchase: 0, fee: 0 }));
                 const currentMonthNum = ref(new Date().getMonth() + 1)
                 const selectedYear = ref(new Date().getFullYear())
 
@@ -1655,7 +1827,7 @@
 
                 return {
                     cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
-                    activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
+                    activeTab, activeStockCode, stockDisplayRows, stockManualDisplayRows, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
                     hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,
