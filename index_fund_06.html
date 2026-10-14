@@ -86,7 +86,7 @@
                         <div class="mt-2.5 space-y-2">
                             <div class="flex flex-wrap gap-1.5">
                                 <div v-for="item in commonItems" :key="item" class="group relative inline-flex items-center bg-darkBg hover:bg-borderCol/80 border border-borderCol text-gray-300 rounded-lg text-xs font-medium transition">
-                                    <button type="button" @click="form.title = item" class="px-2.5 py-1 text-left cursor-pointer flex items-center gap-1">
+                                    <button type="button" @click="appendItemTitle(item)" class="px-2.5 py-1 text-left cursor-pointer flex items-center gap-1">
                                         <span class="text-accentBlue">+</span> {{ item }}
                                     </button>
                                     <button type="button" @click="removeCustomItem(item)" class="pr-2 pl-0.5 text-gray-500 hover:text-rose-400 transition cursor-pointer" title="刪除此標籤">
@@ -856,6 +856,12 @@
                 const commonItems = ref(savedCommonItems ? JSON.parse(savedCommonItems) : ['午餐', '晚餐', '早餐', '飲料/咖啡', '加油', '停車費', '超商購物', '網購']);
                 const newCustomItem = ref('');
 
+                const appendItemTitle = (item) => {
+                    const title = form.value.title.trim();
+                    if (title.split('、').some(part => part.trim() === item)) return;
+                    form.value.title = title ? `${title.replace(/、\s*$/, '')}、${item}` : item;
+                };
+
                 const addCustomItem = () => {
                     const trimmed = newCustomItem.value.trim();
                     if (trimmed && !commonItems.value.includes(trimmed)) {
@@ -1387,7 +1393,7 @@
 
                 return {
                     activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
-                    form, commonItems, newCustomItem, addCustomItem, removeCustomItem,
+                    form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, filteredTransactions, categoryTotals,
                     formatDate, formatMoney, saveAllSummaries, fetchData,
                     isSubmitting, syncStatus, syncError, pendingSave, retrySave, showSuccessToast, toastMessage, showModal,
