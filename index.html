@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-TW" class="dark">
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,14 +12,14 @@
             theme: {
                 extend: {
                     colors: {
-                        darkBg: '#101517',
-                        cardBg: '#1a2226',
-                        cardBgHover: '#202b30',
-                        borderCol: '#303d42',
-                        accentGreen: '#87b89c',
-                        accentRed: '#da9290',
-                        accentBlue: '#91b9c2',
-                        accentIndigo: '#a2b3bd'
+                        darkBg: '#f5f4ef',
+                        cardBg: '#ffffff',
+                        cardBgHover: '#e8ece5',
+                        borderCol: '#dedfd6',
+                        accentGreen: '#39715b',
+                        accentRed: '#ad4d43',
+                        accentBlue: '#456c78',
+                        accentIndigo: '#62687b'
                     }
                 }
             }
@@ -32,85 +32,112 @@
     <style>
         /* 自訂滑動軸 */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0f0f13; }
-        ::-webkit-scrollbar-thumb { background: #272733; border-radius: 9999px; }
-        ::-webkit-scrollbar-thumb:hover { background: #3f3f50; }
+        ::-webkit-scrollbar-track { background: #f5f4ef; }
+        ::-webkit-scrollbar-thumb { background: #c8cfc1; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #aab8a1; }
 
-        /* Graphite / brushed steel: consistent styling without extra font or image requests. */
+        /* Warm paper, white surfaces and forest accents. */
         body.ledger-theme {
-            color-scheme: dark;
-            background: radial-gradient(ellipse at 80% 0%, #20323855, transparent 45%), #101517;
-            color: #e5ecee;
+            color-scheme: light;
+            background: radial-gradient(ellipse at 90% 0%, #e5ead855, transparent 45%), #f5f4ef;
+            color: #293831;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
             font-variant-numeric: tabular-nums;
             line-height: 1.6;
         }
         .ledger-theme #app { max-width: 1360px; }
-        .ledger-theme .ledger-header { padding-block: 14px 28px; border-color: #344249; }
-        .ledger-theme .brand-caption { color: #aac3c8; font-size: 11px; letter-spacing: .2em; font-weight: 650; margin-bottom: 5px; }
-        .ledger-theme .brand-caption span { margin-left: 12px; color: #9aaeb5; letter-spacing: .08em; font-weight: 400; }
+        .ledger-theme .ledger-header { padding-block: 14px 28px; border-color: #d9ded4; }
+        .ledger-theme .brand-caption { color: #456356; font-size: 16px; letter-spacing: .2em; font-weight: 650; margin-bottom: 5px; }
+        .ledger-theme .brand-caption span { margin-left: 12px; color: #6b786e; letter-spacing: .08em; font-weight: 400; }
         .ledger-theme h1 { font-size: clamp(22px, 2.3vw, 30px); font-weight: 600; letter-spacing: .025em; }
         .ledger-theme h2, .ledger-theme h3 { letter-spacing: .03em; }
-        .ledger-theme .brand-mark { width: 48px; height: 48px; border-radius: 12px; background: #27363c; border: 1px solid #42565e; color: #b4d0d5; box-shadow: inset 0 1px 0 #ffffff0d; }
-        .ledger-theme .bg-cardBg { background-color: #1a2226; }
-        .ledger-theme div.bg-cardBg.border { box-shadow: inset 0 1px 0 #ffffff05, 0 10px 28px #00000012; }
+        .ledger-theme .brand-mark { width: 48px; height: 48px; border-radius: 12px; background: #e6ece2; border: 1px solid #d0dacb; color: #456356; box-shadow: inset 0 1px 0 #ffffff80; }
+        .ledger-theme .bg-cardBg { background-color: #ffffff; }
+        .ledger-theme :is(div, section).bg-cardBg.border { box-shadow: 0 3px 16px #25352b06; }
         .ledger-theme .rounded-3xl { border-radius: 18px; }
         .ledger-theme .rounded-2xl { border-radius: 12px; }
         .ledger-theme [class*="shadow-"] { --tw-shadow: 0 0 transparent; --tw-shadow-colored: 0 0 transparent; }
-        .ledger-theme .period-picker { background-color: #172024; border-radius: 12px; padding: 8px; }
-        .ledger-theme .ledger-tabs { gap: 6px; padding: 6px; margin-bottom: 28px; background: #151c20; border: 1px solid #2c393f; border-radius: 14px; scrollbar-width: thin; }
+        .ledger-theme .period-picker { background-color: #eeefe8; border-radius: 12px; padding: 8px; }
+        .ledger-theme .ledger-tabs { gap: 6px; padding: 6px; margin-bottom: 28px; background: #eeefe8; border: 1px solid #dce1d6; border-radius: 14px; scrollbar-width: thin; }
         .ledger-theme .ledger-tabs button { border-radius: 9px; padding: 12px 18px; flex-shrink: 0; }
-        .ledger-theme .tab-active { color: #e9f1f3; background: #2a3b42; border-color: #4a646d; box-shadow: inset 0 -2px 0 #91b9c2; }
-        .ledger-theme .tab-idle { color: #a4b5bb; background: transparent; border-color: transparent; }
-        .ledger-theme .tab-idle:hover { color: #e9f1f3; background: #202b30; }
-        .ledger-theme .primary-action { background: #aac7c4; background-image: none; color: #152625; border: 1px solid #c5dcda55; font-weight: 650; box-shadow: inset 0 1px 0 #ffffff25; }
-        .ledger-theme .primary-action:hover { background: #c0d8d4; }
-        .ledger-theme .primary-action:active { background: #97b8b3; }
+        .ledger-theme .tab-active { color: #ffffff; background: #365e55; border-color: #365e55; box-shadow: 0 2px 6px #23392d12; }
+        .ledger-theme .tab-idle { color: #58685f; background: transparent; border-color: transparent; }
+        .ledger-theme .tab-idle:hover { color: #365e55; background: #e8ece5; }
+        .ledger-theme .primary-action { background: #365e55; background-image: none; color: #ffffff; border: 1px solid #365e55; font-weight: 650; box-shadow: inset 0 1px 0 #ffffff18; }
+        .ledger-theme .primary-action:hover { background: #294e46; }
+        .ledger-theme .primary-action:active { background: #22443d; }
         .ledger-theme .section-toolbar { gap: 16px; flex-wrap: wrap; }
-        .ledger-theme .text-gray-400 { color: #a3b2ba; }
-        .ledger-theme .text-gray-500 { color: #8c9fa9; }
-        .ledger-theme .text-rose-400, .ledger-theme .text-rose-300 { color: #e0a6a1; }
-        .ledger-theme .text-emerald-400 { color: #9bc7ab; }
-        .ledger-theme .text-amber-400 { color: #cfbb91; }
-        .ledger-theme .text-blue-400, .ledger-theme .text-indigo-400 { color: #a4c2cd; }
-        .ledger-theme [class*="bg-gradient-to"]:not(button):not(.brand-mark) { background-image: none; background-color: #18252a; }
-        .ledger-theme .entry-dialog { border: 1px solid #42535c; background: #1a2226; border-radius: 20px; box-shadow: 0 30px 90px #00000080; max-height: calc(100dvh - 32px); overflow-y: auto; }
-        .ledger-theme .entry-dialog label { color: #b2bfc5; font-size: 12px; letter-spacing: .04em; }
-        .ledger-theme .entry-dialog form > div > input, .ledger-theme .entry-dialog select { padding: 12px 14px; background: #121a1e; border-color: #34464f; border-radius: 10px; }
-        .ledger-theme .entry-dialog .group { background: #202d33; border-color: #3a505b; color: #c7d8de; border-radius: 7px; }
-        .ledger-theme .entry-dialog .group:hover { background: #2d424b; }
+        .ledger-theme .text-gray-400 { color: #667469; }
+        .ledger-theme .text-gray-500 { color: #727b72; }
+        .ledger-theme .text-rose-400, .ledger-theme .text-rose-300 { color: #a3443b; }
+        .ledger-theme .text-emerald-400 { color: #39715b; }
+        .ledger-theme .text-amber-400 { color: #8b671d; }
+        .ledger-theme .text-blue-400, .ledger-theme .text-indigo-400 { color: #456c78; }
+        .ledger-theme [class*="bg-gradient-to"]:not(button):not(.brand-mark) { background-image: none; background-color: #edf1e8; }
+        .ledger-theme .entry-dialog { border: 1px solid #d8dfd2; background: #ffffff; border-radius: 20px; box-shadow: 0 30px 90px #1c30252b; max-height: calc(100dvh - 32px); overflow-y: auto; }
+        .ledger-theme .entry-dialog label { color: #56685a; font-size: 12px; letter-spacing: .04em; }
+        .ledger-theme .entry-dialog form > div > input, .ledger-theme .entry-dialog select { padding: 12px 14px; background: #f6f7f2; border-color: #d6dfd0; border-radius: 10px; }
+        .ledger-theme .entry-dialog .group { background: #edf1e8; border-color: #d3decf; color: #456356; border-radius: 7px; }
+        .ledger-theme .entry-dialog .group:hover { background: #e0e8da; }
         .ledger-theme .entry-dialog .group button { min-height: 32px; }
-        .ledger-theme input, .ledger-theme select { color: #e7eef0; accent-color: #91b9c2; }
-        .ledger-theme input::placeholder { color: #81939e; opacity: 1; }
-        .ledger-theme :is(input, select):focus { border-color: #91b9c2; outline: 2px solid #91b9c245; outline-offset: 2px; box-shadow: none; }
-        .ledger-theme button:focus-visible { outline: 2px solid #c6dedc; outline-offset: 3px; }
+        .ledger-theme input, .ledger-theme select { color: #293831; accent-color: #456c78; }
+        .ledger-theme input::placeholder { color: #899085; opacity: 1; }
+        .ledger-theme :is(input, select):focus { border-color: #456c78; outline: 2px solid #456c7845; outline-offset: 2px; box-shadow: none; }
+        .ledger-theme button:focus-visible { outline: 2px solid #456c78; outline-offset: 3px; }
         .ledger-theme button:disabled { opacity: .5; cursor: wait; }
         .ledger-theme table { font-variant-numeric: tabular-nums; }
         .ledger-theme .cashflow-scroll { overflow-x: auto; max-width: 100%; }
-        .ledger-theme .cashflow-table { table-layout: fixed; font-size: 13px; line-height: 1.4; }
-        .ledger-theme .cashflow-table th, .ledger-theme .cashflow-table td { padding: 6px 8px; }
+        .ledger-theme .cashflow-table { table-layout: fixed; font-size: 13px; line-height: 1.3; }
+        .ledger-theme .cashflow-table th, .ledger-theme .cashflow-table td { padding: 4px 6px; }
+        .ledger-theme .cashflow-table td:not([colspan]) { text-align: center; }
         .ledger-theme .cashflow-table tbody td:has(input), .ledger-theme .cashflow-table tfoot td:has(input) { padding: 0; }
         .ledger-theme .cashflow-table th:first-child { width: 80px; white-space: nowrap; }
-        .ledger-theme .cashflow-table input { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 8px; min-height: 32px; }
+        .ledger-theme .cashflow-table input { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; min-height: 28px; text-align: center; }
         .ledger-theme .transaction-table { min-width: 640px; }
         .ledger-theme .transaction-table td:first-child { white-space: nowrap; }
         .ledger-theme table.text-xs { min-width: 900px; }
-        .ledger-theme thead { background-color: #172126; }
-        .ledger-theme thead th { color: #aebec6; font-weight: 550; letter-spacing: .03em; white-space: nowrap; }
-        .ledger-theme tbody tr:hover { background-color: #23313966; }
-        .ledger-theme .success-notice { background: #203b32; color: #d8eee1; border-color: #5f8f78; border-radius: 12px; box-shadow: 0 12px 32px #00000040; }
-        .ledger-theme footer { color: #8b9da6; letter-spacing: .06em; }
-        .ledger-theme ::-webkit-scrollbar-track { background: #12191d; }
-        .ledger-theme ::-webkit-scrollbar-thumb { background: #40525c; }
+        .ledger-theme .compact-ledger .bg-cardBg { padding: 12px; }
+        .ledger-theme :is(.compact-ledger, .expenses-compact) table { line-height: 1.3; }
+        .ledger-theme :is(.compact-ledger, .expenses-compact) table th, .ledger-theme :is(.compact-ledger, .expenses-compact) table td { padding: 4px 6px; }
+        .ledger-theme :is(.compact-ledger, .expenses-compact) table input { padding: 4px 6px; min-height: 28px; box-sizing: border-box; }
+        .ledger-theme .expenses-compact .expenses-card { padding: 12px; }
+        .ledger-theme .expenses-compact .grid { gap: 12px; }
+        .ledger-theme .expenses-compact .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 8px; margin-bottom: 0; }
+        .ledger-theme .assets-compact .grid { gap: 12px; }
+        .ledger-theme .assets-compact .rounded-2xl { padding: 8px; }
+        .ledger-theme .assets-compact div.rounded-xl { padding: 4px 6px; }
+        .ledger-theme .assets-compact input { padding: 4px 6px; min-height: 28px; box-sizing: border-box; }
+        .ledger-theme .assets-compact :is(.space-y-4, .space-y-3, .space-y-2\.5) > :not([hidden]) ~ :not([hidden]) { margin-top: 6px; margin-bottom: 0; }
+        .ledger-theme thead { background-color: #edf0e8; }
+        .ledger-theme thead th { color: #526459; font-weight: 550; letter-spacing: .03em; white-space: nowrap; }
+        .ledger-theme tbody tr:hover { background-color: #e8eee566; }
+        .ledger-theme .success-notice { background: #e9f2e8; color: #315a43; border-color: #bdd4ba; border-radius: 12px; box-shadow: 0 12px 32px #25352b15; }
+        .ledger-theme footer { color: #788378; letter-spacing: .06em; }
+        .ledger-theme ::-webkit-scrollbar-track { background: #edf0e8; }
+        .ledger-theme ::-webkit-scrollbar-thumb { background: #bbc7b6; }
+        .ledger-theme .text-white, .ledger-theme .text-gray-100, .ledger-theme .text-gray-200, .ledger-theme .text-gray-300 { color: #293831; }
+        .ledger-theme .text-amber-300 { color: #85601c; }
+        .ledger-theme button.primary-action { color: #ffffff; }
+        .ledger-theme .bg-darkBg { background-color: #f5f6f0; }
+        .ledger-theme .border-gray-600, .ledger-theme .border-gray-700 { border-color: #d6dfd0; }
+        .ledger-theme .entry-dialog { box-shadow: 0 24px 80px #1c302526; }
+        .ledger-theme .period-picker { border: 1px solid #dce1d6; }
+        .ledger-theme thead tr, .ledger-theme tfoot tr.bg-darkBg { background: #edf0e8; }
+        .ledger-theme .cashflow-table input[readonly] { background: #edf2e8; color: #456356; }
+        .ledger-theme input:disabled { color: #727b72; }
+        .ledger-theme .ledger-tabs { margin-bottom: 20px; }
+        .ledger-theme ::selection { background: #d6e3cd; color: #293831; }
         @media (max-width: 640px) {
             .ledger-theme #app { padding: 16px 14px 48px; }
             .ledger-theme .ledger-header { gap: 20px; padding-block: 8px 24px; }
             .ledger-theme .brand-mark { width: 42px; height: 42px; flex-shrink: 0; }
-            .ledger-theme .brand-caption { font-size: 10px; }
+            .ledger-theme .brand-caption { font-size: 14px; }
             .ledger-theme .brand-caption span { display: none; }
             .ledger-theme .period-picker { width: 100%; justify-content: space-between; }
             .ledger-theme .ledger-tabs button { min-height: 44px; padding: 10px 14px; }
             .ledger-theme .entry-dialog { padding: 22px; }
+            .ledger-theme .compact-ledger .bg-cardBg { padding: 8px; }
+            .ledger-theme .expenses-compact .expenses-card { padding: 8px; }
             .ledger-theme .entry-dialog form > .flex button { min-height: 46px; }
             .ledger-theme .success-notice { left: 14px; right: 14px; top: 14px; }
         }
@@ -124,7 +151,7 @@
     <div id="app" v-cloak class="max-w-7xl mx-auto p-4 sm:p-8 pb-16">
         
         <!-- ================= 全螢幕載入轉圈圈遮罩 ================= -->
-        <div v-if="isSubmitting" class="fixed inset-0 bg-black/70 z-50 flex flex-col items-center justify-center backdrop-blur-md transition-all">
+        <div v-if="isSubmitting" class="fixed inset-0 bg-stone-100/90 z-50 flex flex-col items-center justify-center backdrop-blur-md transition-all">
             <div class="w-14 h-14 border-4 border-accentBlue border-t-transparent rounded-full animate-spin mb-4 shadow-lg shadow-blue-500/20"></div>
             <p class="text-gray-200 font-medium text-sm tracking-wider">{{ syncStatus }}</p>
         </div>
@@ -142,7 +169,7 @@
         </div>
 
         <!-- ================= 記一筆 / 編輯開銷懸浮視窗 (Modal) ================= -->
-        <div v-if="showModal" class="fixed inset-0 bg-black/75 z-40 flex items-center justify-center p-4 backdrop-blur-md transition-all">
+        <div v-if="showModal" class="fixed inset-0 bg-slate-900/35 z-40 flex items-center justify-center p-4 backdrop-blur-md transition-all">
             <div class="entry-dialog bg-cardBg w-full max-w-md p-6 sm:p-7 rounded-3xl border border-borderCol shadow-2xl relative">
                 <div class="flex justify-between items-center mb-5 border-b border-borderCol pb-4">
                     <h2 class="text-base font-semibold flex items-center gap-2.5 text-white">
@@ -219,7 +246,7 @@
                     <div class="brand-mark w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
                         <i aria-hidden="true" class="fa-solid fa-wallet text-lg"></i>
                     </div>
-                    <div><p class="brand-caption">SKY MONEYBOOK <span>個人財務帳本</span></p><h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-white">讓每一筆收支，都有條理。</h1></div>
+                    <div><p class="brand-caption">SKY MONEYBOOK <span>個人財務帳本</span></p></div>
                 </div>
                 <p class="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
                     <span class="inline-block w-2 h-2 rounded-full" :class="syncError ? 'bg-rose-500' : isSubmitting ? 'bg-blue-500 animate-pulse' : 'bg-gray-400'"></span>
@@ -265,32 +292,58 @@
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-chart-line"></i> 基金投資
             </button>
+            <button @click="activeTab = 'stocks'" :aria-current="activeTab === 'stocks' ? 'page' : null"
+                :class="activeTab === 'stocks' ? 'tab-active' : 'tab-idle'"
+                class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i aria-hidden="true" class="fa-solid fa-arrow-trend-up"></i> 股票
+            </button>
+            <button @click="activeTab = 'deposits'" :aria-current="activeTab === 'deposits' ? 'page' : null"
+                :class="activeTab === 'deposits' ? 'tab-active' : 'tab-idle'"
+                class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i aria-hidden="true" class="fa-solid fa-piggy-bank"></i> 定存
+            </button>
             <button @click="activeTab = 'assets'" :aria-current="activeTab === 'assets' ? 'page' : null"
                 :class="activeTab === 'assets' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-landmark"></i> 總資產
             </button>
-            <button @click="activeTab = 'cashflow'" :aria-current="activeTab === 'cashflow' ? 'page' : null" :class="activeTab === 'cashflow' ? 'tab-active' : 'tab-idle'" class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition border cursor-pointer whitespace-nowrap">配息</button>
+            <button @click="activeTab = 'cashflow'" :aria-current="activeTab === 'cashflow' ? 'page' : null" :class="activeTab === 'cashflow' ? 'tab-active' : 'tab-idle'" class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i aria-hidden="true" class="fa-solid fa-coins"></i> 配息
+            </button>
         </div>
 
-        <!-- ================= 頁籤一：日常開銷明細 ================= -->
-        <section v-show="activeTab === 'cashflow'" class="bg-cardBg border border-borderCol rounded-2xl p-3 sm:p-4 mb-4">
+        <!-- ================= 頁籤：股票 ================= -->
+        <section v-show="activeTab === 'stocks'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
+            <h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年股票投資記錄</h2>
+            <p class="text-sm text-gray-400 mt-2">尚無股票記錄。</p>
+        </section>
+
+        <!-- ================= 頁籤：定存 ================= -->
+        <section v-show="activeTab === 'deposits'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
+            <h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年定存記錄</h2>
+            <p class="text-sm text-gray-400 mt-2">尚無定存記錄。</p>
+        </section>
+
+        <!-- ================= 頁籤：配息 ================= -->
+        <section v-show="activeTab === 'cashflow'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
             <div class="flex flex-wrap gap-2 justify-between items-center mb-3"><div><h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年現金流配息記錄</h2><p class="text-xs text-gray-400 mt-1">直接填寫每月金額，完成後一併提交。總計依圖片直接加總各欄，不換算匯率。</p></div><button @click="saveCashflowRecord" :disabled="isSubmitting || !cashflowReady" class="primary-action px-3 py-2 rounded-xl text-sm disabled:opacity-40">提交配息記錄</button></div>
             <p v-if="!cashflowReady" role="status" class="text-sm text-amber-300 mb-4">請部署新版 GAS 並重新載入，才能填寫與儲存配息記錄。</p>
+            <p v-if="cashflowReady && !fundInterestReady" role="alert" class="text-xs text-amber-300 mb-2">基金資料尚未成功載入，暫時無法帶入利息與提交配息。</p>
+            <p v-else-if="hasUnsavedFunds" role="status" class="text-xs text-amber-300 mb-2">已預覽基金頁修改後的利息；請先儲存基金投資，再提交配息。</p>
             <div class="cashflow-scroll overflow-x-auto"><table class="w-full text-sm border-collapse cashflow-table" style="min-width:700px">
                 <thead><tr class="bg-darkBg"><th class="p-3 border border-borderCol">月份</th><th v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol">{{ col.label }}</th><th class="p-3 border border-borderCol">總計</th></tr></thead>
-                <tbody><tr v-for="month in 12" :key="month"><th class="p-2 border border-borderCol font-normal">{{ month }}</th><td v-for="col in cashflowColumns" :key="col.key" class="border border-borderCol"><input type="number" min="0" step="0.01" :aria-label="month + ' 月 ' + col.label" v-model.number="currentCashflow.months[month][col.key]" :disabled="isSubmitting || !cashflowReady" class="w-full min-w-0 bg-transparent text-right p-3 outline-none focus:bg-darkBg focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthTotal(month)) }}</td></tr></tbody>
+                <tbody><tr v-for="month in 12" :key="month"><th class="p-2 border border-borderCol font-normal">{{ month }}</th><td v-for="col in cashflowColumns" :key="col.key" class="border border-borderCol"><input v-if="col.key === 'fundTWD'" type="number" readonly :aria-label="month + ' 月 ' + col.label" :value="cashflowFundInterest(selectedYear, month)" class="w-full min-w-0 bg-darkBg text-accentBlue text-right font-mono" placeholder="—" title="自動帶入安泰台幣每月利息，請至基金投資修改"><input v-else type="number" min="0" step="0.01" :aria-label="month + ' 月 ' + col.label" v-model.number="currentCashflow.months[month][col.key]" :disabled="isSubmitting || !cashflowReady" class="w-full min-w-0 bg-transparent text-right p-3 outline-none focus:bg-darkBg focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthTotal(month)) }}</td></tr></tbody>
                 <tfoot><tr class="bg-darkBg font-semibold"><th class="p-3 border border-borderCol">年度合計</th><td v-for="col in cashflowColumns" :key="col.key" class="p-3 border border-borderCol text-right font-mono">{{ formatMoney(cashflowColumnTotal(col.key)) }}</td><td class="p-3 border border-borderCol text-right font-mono text-accentRed">{{ formatMoney(cashflowMonthlyTotal) }}</td></tr>
                 <tr><td colspan="5" class="p-3 text-right">台幣定存利息</td><td class="border border-borderCol"><input aria-label="台幣定存利息" type="number" min="0" step="0.01" v-model.number="currentCashflow.depositTWD" :disabled="isSubmitting || !cashflowReady" class="w-full bg-transparent text-right p-3 focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td></td></tr>
                 <tr><td colspan="5" class="p-3 text-right">美金定存利息</td><td class="border border-borderCol"><input aria-label="美金定存利息" type="number" min="0" step="0.01" v-model.number="currentCashflow.depositUSD" :disabled="isSubmitting || !cashflowReady" class="w-full bg-transparent text-right p-3 focus:ring-1 focus:ring-accentBlue" placeholder="—"></td><td></td></tr>
                 <tr class="bg-darkBg"><td colspan="6" class="p-3 text-right font-semibold">年度總計（含定存利息）</td><td class="p-3 text-right font-semibold font-mono text-accentRed">{{ formatMoney(cashflowAnnualTotal) }}</td></tr></tfoot>
             </table></div>
-            <p class="text-xs text-gray-400 mt-2">此頁獨立記錄配息／現金流，不會修改基金投資頁；空白與 0 分別保存。</p>
+            <p class="text-xs text-gray-400 mt-2">基金(台)自動帶入同年度安泰台幣每月利息，請至基金投資修改；其他欄位仍可填寫。</p>
         </section>
 
-        <div v-show="activeTab === 'transactions'">
-            <div class="bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl mb-6">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+        <div v-show="activeTab === 'transactions'" class="expenses-compact">
+            <div class="expenses-card bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl mb-3">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
                     <h2 class="text-xs sm:text-sm font-semibold text-accentBlue flex items-center gap-2">
                         <i aria-hidden="true" class="fa-solid fa-table-cells"></i> {{ selectedYear }} 年 {{ currentMonthNum }} 月份專屬收支摘要填報
                     </h2>
@@ -347,7 +400,7 @@
                             </button>
                         </div>
                     </div>
-                    <div class="flex items-center gap-3 bg-cardBg rounded-xl border border-borderCol px-3 py-2.5">
+                    <div class="flex items-center gap-2 bg-cardBg rounded-xl border border-borderCol px-2 py-1.5">
                         <i aria-hidden="true" class="fa-solid fa-magnifying-glass text-gray-400"></i>
                         <label for="detail-search" class="sr-only">搜尋本月明細</label>
                         <input id="detail-search" type="search" v-model="searchQuery" placeholder="搜尋本月項目名稱或分類…" class="min-w-0 flex-1 bg-transparent text-sm focus:outline-none rounded-lg px-2 py-1">
@@ -398,8 +451,8 @@
                     <h2 class="font-semibold text-gray-200 text-base flex items-center gap-2">
                         <i aria-hidden="true" class="fa-solid fa-chart-pie text-accentBlue"></i> 各分類開銷累計
                     </h2>
-                    <div class="bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl space-y-3">
-                        <div v-for="(amount, category) in categoryTotals" :key="category" class="flex justify-between items-center p-3.5 bg-darkBg/60 rounded-2xl border border-borderCol/60 hover:border-gray-700 transition">
+                    <div class="expenses-card bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl space-y-2">
+                        <div v-for="(amount, category) in categoryTotals" :key="category" class="flex justify-between items-center px-2 py-1.5 bg-darkBg/60 rounded-2xl border border-borderCol/60 hover:border-gray-700 transition">
                             <span class="text-sm font-medium text-gray-300 flex items-center gap-2.5">
                                 <span class="w-2 h-2 rounded-full bg-accentBlue"></span> {{ category }}
                             </span>
@@ -412,9 +465,9 @@
         </div>
 
         <!-- ================= 頁籤二：全年 12 個月收支摘要總表 ================= -->
-        <div v-show="activeTab === 'summary'">
-            <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl mb-8">
-                <div class="flex justify-between items-center mb-5">
+        <div v-show="activeTab === 'summary'" class="compact-ledger">
+            <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl mb-4">
+                <div class="flex flex-wrap gap-2 justify-between items-center mb-3">
                     <h2 class="text-base font-semibold flex items-center gap-2 text-white">
                         <i aria-hidden="true" class="fa-solid fa-calendar-days text-accentBlue"></i> {{ selectedYear }} 年 12 個月收支摘要總表
                     </h2>
@@ -456,8 +509,8 @@
         </div>
 
         <!-- ================= 頁籤：基金投資記錄 ================= -->
-        <div v-show="activeTab === 'funds'">
-            <div class="space-y-8">
+        <div v-show="activeTab === 'funds'" class="compact-ledger">
+            <div class="space-y-4">
                 <div class="section-toolbar flex justify-between items-center bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl">
                     <div>
                         <h2 class="text-lg font-bold text-white flex items-center gap-2">
@@ -672,16 +725,16 @@
         </div>
 
         <!-- ================= 頁籤三 : 資產負債紀錄 ================= -->
-        <div v-show="activeTab === 'assets'">
-            <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl mb-8">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-borderCol pb-5">
+        <div v-show="activeTab === 'assets'" class="compact-ledger assets-compact">
+            <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl mb-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2 border-b border-borderCol pb-3">
                     <div>
                         <h2 class="text-base font-semibold flex items-center gap-2 text-white">
                             <i aria-hidden="true" class="fa-solid fa-landmark text-accentBlue"></i> {{ currentYM }} 月份資產負債與投資清單
                         </h2>
                         <p class="text-xs text-gray-400 mt-1">每月定期記錄一次資產狀況，數據將自動同步至雲端試算表。</p>
                     </div>
-                    <div class="flex items-center gap-4 bg-darkBg/60 px-5 py-3 rounded-2xl border border-borderCol">
+                    <div class="flex items-center gap-2 bg-darkBg/60 px-5 py-3 rounded-2xl border border-borderCol">
                         <div class="text-right">
                             <div class="text-[11px] text-gray-400 uppercase tracking-wider">總財產合計</div>
                             <div class="text-xl font-bold text-emerald-400 font-mono">NT$ {{ formatMoney(totalAssets) }}</div>
@@ -693,7 +746,7 @@
                 </div>
 
                 <!-- 記帳日期備註 -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 bg-darkBg/50 p-4 rounded-2xl border border-borderCol">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3 bg-darkBg/50 p-4 rounded-2xl border border-borderCol">
                     <div>
                         <label class="block text-xs font-medium text-gray-400 mb-1.5">記錄日期 (備註)</label>
                         <input type="date" v-model="currentAssetData.date" @click="$event.target.showPicker && $event.target.showPicker()" class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-accentBlue cursor-pointer transition">
@@ -950,6 +1003,14 @@
                 };
                 const cashflowRecords = ref({});
                 const cashflowReady = ref(false);
+                const fundInterestReady = ref(false);
+                const cashflowFundInterest = (year, month) => fundInterestReady.value ? (fundsRecords.value[year]?.entieTWD?.months?.[month]?.interest ?? '') : '';
+                const cashflowCellValue = (month, key) => key === 'fundTWD' ? cashflowFundInterest(selectedYear.value, month) : currentCashflow.value.months[month][key];
+                const cashflowSnapshot = data => {
+                    const result = clone(data);
+                    for (const year in result) for (const month in result[year].months) result[year].months[month].fundTWD = cashflowFundInterest(year, month);
+                    return result;
+                };
                 const cashflowColumns = [{key:'fundTWD',label:'基金(台)'},{key:'fundUSD',label:'基金(美)'},{key:'etfTWD',label:'ETF(台)'},{key:'allianzUSD',label:'安聯(美)'},{key:'insurance',label:'保險'}];
                 const emptyCashflow = () => ({months:Object.fromEntries(Array.from({length:12},(_,i)=>[i+1,Object.fromEntries(cashflowColumns.map(c=>[c.key,'']))])),depositTWD:'',depositUSD:''});
                 const initCashflow = year => {
@@ -958,13 +1019,13 @@
                 };
                 const currentCashflow = computed(() => {initCashflow(selectedYear.value);return cashflowRecords.value[selectedYear.value];});
                 const cashflowRound = n => Math.round((n + Number.EPSILON)*100)/100;
-                const cashflowMonthTotal = month => cashflowRound(cashflowColumns.reduce((n,c)=>n+Number(currentCashflow.value.months[month][c.key]||0),0));
-                const cashflowColumnTotal = key => cashflowRound(Object.values(currentCashflow.value.months).reduce((n,r)=>n+Number(r[key]||0),0));
+                const cashflowMonthTotal = month => cashflowRound(cashflowColumns.reduce((n,c)=>n+Number(cashflowCellValue(month,c.key)||0),0));
+                const cashflowColumnTotal = key => cashflowRound(Object.keys(currentCashflow.value.months).reduce((n,month)=>n+Number(cashflowCellValue(month,key)||0),0));
                 const cashflowMonthlyTotal = computed(()=>cashflowRound(cashflowColumns.reduce((n,c)=>n+cashflowColumnTotal(c.key),0)));
                 const cashflowAnnualTotal = computed(()=>cashflowRound(cashflowMonthlyTotal.value+Number(currentCashflow.value.depositTWD||0)+Number(currentCashflow.value.depositUSD||0)));
                 const saveCashflowRecord = () => {
                     if (!cashflowReady.value) {syncError.value='請先部署新版 GAS 並載入配息記錄。';return false;}
-                    for (const record of Object.values(cashflowRecords.value)) {
+                    for (const record of Object.values(cashflowSnapshot(cashflowRecords.value))) {
                         const values = [record.depositTWD,record.depositUSD,...Object.values(record.months).flatMap(row=>cashflowColumns.map(c=>row[c.key]))];
                         if (values.some(v=>v!=='' && (typeof v!=='number' || !Number.isFinite(v) || v<0))) {syncError.value='配息金額請填寫非負數字。';return false;}
                     }
@@ -1320,6 +1381,7 @@
                         const result = {};
                         for (const field in data) {
                             if (key === 'transactions' && field === 'id') continue;
+                            if (key === 'cashflowRecords' && field === 'fundTWD') continue;
                             if (key === 'summaries' && ['month', 'livingExpense'].includes(field)) continue;
                             if (key === 'assetsRecords' && ['invEntieUSD', 'currJPY', 'currUSD', 'currHKD'].includes(field)) continue;
                             const v = data[field];
@@ -1334,6 +1396,7 @@
                 };
                 const datasetDirty = Object.fromEntries(Object.keys(cleanData.value).map(key => [key, computed(() =>
                     canonical(editableSnapshot(key, datasetRefs()[key])) !== canonical(editableSnapshot(key, cleanData.value[key])))]));
+                const hasUnsavedFunds = computed(() => datasetDirty.fundsRecords.value);
                 const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
                 const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
@@ -1351,7 +1414,8 @@
                         transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
                         allSummaries.value = clone(data.summaries);
                         assetsRecords.value = clone(data.assetsRecords);
-                        if (!data.datasetErrors?.fundsRecords) fundsRecords.value = clone(data.fundsRecords);
+                        fundInterestReady.value = !data.datasetErrors?.fundsRecords;
+                        if (fundInterestReady.value) fundsRecords.value = clone(data.fundsRecords);
                         cashflowReady.value = data.protocolVersion >= 6 && !data.datasetErrors?.cashflowRecords;
                         if (cashflowReady.value) cashflowRecords.value = clone(data.cashflowRecords);
                         remoteSnapshot = clone(data);
@@ -1387,7 +1451,11 @@
                         syncError.value = '尚未成功載入雲端資料，請先重新載入，避免覆蓋既有紀錄。';
                         return false;
                     }
-                    const expected = clone(value);
+                    if (key === 'cashflowRecords') {
+                        if (!fundInterestReady.value) { syncError.value = '基金資料尚未成功載入，無法帶入利息；請重新載入雲端資料。'; return false; }
+                        if (hasUnsavedFunds.value) { syncError.value = '請先儲存基金投資，再提交配息，確保帶入利息已儲存。'; return false; }
+                    }
+                    const expected = key === 'cashflowRecords' ? cashflowSnapshot(value) : clone(value);
                     if (key === 'summaries') {
                         for (const year in expected) for (const month in expected[year]) {
                             const row = expected[year][month];
@@ -1586,7 +1654,7 @@
                 };
 
                 return {
-                    cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
+                    cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
                     activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
