@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>個人日常收支與全年摘要管理</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#0f0f13',
+                        cardBg: '#18181f',
+                        cardBgHover: '#1f1f2a',
+                        borderCol: '#272733',
+                        accentGreen: '#10b981',
+                        accentRed: '#f43f5e',
+                        accentBlue: '#3b82f6',
+                        accentIndigo: '#6366f1'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- 引入 Vue.js 3 產線穩定版 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <!-- 引入 FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* 自訂滑動軸 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f0f13; }
+        ::-webkit-scrollbar-thumb { background: #272733; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3f3f50; }
+    </style>
+</head>
+<body class="bg-darkBg text-gray-100 min-h-screen font-sans antialiased relative selection:bg-accentBlue selection:text-white">
+    <!-- 加上 v-cloak 防止畫面載入時閃爍 -->
+    <div id="app" v-cloak class="max-w-7xl mx-auto p-4 sm:p-8 pb-16">
+        
+        <!-- ================= 全螢幕載入轉圈圈遮罩 ================= -->
+        <div v-if="isSubmitting" class="fixed inset-0 bg-black/70 z-50 flex flex-col items-center justify-center backdrop-blur-md transition-all">
+            <div class="w-14 h-14 border-4 border-accentBlue border-t-transparent rounded-full animate-spin mb-4 shadow-lg shadow-blue-500/20"></div>
+            <p class="text-gray-200 font-medium text-sm tracking-wider">雲端資料同步中...</p>
+        </div>
+
+        <!-- ================= 成功寫入的彈出通知 (Toast) ================= -->
+        <div v-if="showSuccessToast" class="fixed top-6 right-6 bg-emerald-500/95 text-white px-5 py-3 rounded-2xl shadow-2xl z-50 flex items-center gap-3 backdrop-blur-md border border-emerald-400/30 transition-all duration-300 animate-bounce">
+            <i class="fa-solid fa-circle-check text-lg"></i>
+            <span class="font-semibold text-sm">{{ toastMessage }}</span>
+        </div>
+
+        <!-- ================= 記一筆 / 編輯開銷懸浮視窗 (Modal) ================= -->
+        <div v-if="showModal" class="fixed inset-0 bg-black/75 z-40 flex items-center justify-center p-4 backdrop-blur-md transition-all">
+            <div class="bg-cardBg w-full max-w-md p-6 sm:p-7 rounded-3xl border border-borderCol shadow-2xl relative">
+                <div class="flex justify-between items-center mb-5 border-b border-borderCol pb-4">
+                    <h2 class="text-base font-semibold flex items-center gap-2.5 text-white">
+                        <div :class="isEditing ? 'bg-blue-500/10 text-accentBlue' : 'bg-rose-500/15 text-accentRed'" class="w-8 h-8 rounded-xl flex items-center justify-center text-sm">
+                            <i :class="isEditing ? 'fa-solid fa-pen-to-square' : 'fa-solid fa-circle-plus'"></i>
+                        </div>
+                        {{ isEditing ? '編輯開銷明細' : '記一筆開銷明細' }}
+                    </h2>
+                    <button @click="closeModal" class="w-8 h-8 rounded-xl bg-darkBg hover:bg-borderCol text-gray-400 hover:text-white flex items-center justify-center transition cursor-pointer">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+                <form @submit.prevent="saveTransaction" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">日期</label>
+                        <input type="date" v-model="form.date" @click="$event.target.showPicker && $event.target.showPicker()" required class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue text-white cursor-pointer transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">項目名稱</label>
+                        <input type="text" v-model="form.title" placeholder="例如：午餐、加油" required class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue text-white transition">
+                        
+                        <!-- 常用快速點選項目標籤 (支援自定義增刪) -->
+                        <div class="mt-2.5 space-y-2">
+                            <div class="flex flex-wrap gap-1.5">
+                                <div v-for="item in commonItems" :key="item" class="group relative inline-flex items-center bg-darkBg hover:bg-borderCol/80 border border-borderCol text-gray-300 rounded-lg text-xs font-medium transition">
+                                    <button type="button" @click="form.title = item" class="px-2.5 py-1 text-left cursor-pointer flex items-center gap-1">
+                                        <span class="text-accentBlue">+</span> {{ item }}
+                                    </button>
+                                    <button type="button" @click="removeCustomItem(item)" class="pr-2 pl-0.5 text-gray-500 hover:text-rose-400 transition cursor-pointer" title="刪除此標籤">
+                                        <i class="fa-solid fa-xmark text-[10px]"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- 新增自定義項目小輸入框 -->
+                            <div class="flex gap-2 pt-1">
+                                <input type="text" v-model="newCustomItem" placeholder="新增常用項目名稱..." class="flex-1 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-accentBlue">
+                                <button type="button" @click="addCustomItem" class="bg-accentBlue/20 hover:bg-accentBlue/30 text-accentBlue border border-accentBlue/40 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer">
+                                    新增標籤
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">金額 (NT$)</label>
+                        <input type="number" v-model.number="form.amount" placeholder="0" required class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue text-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">分類標籤</label>
+                        <select v-model="form.category" class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue text-white transition cursor-pointer">
+                            <option value="生活開銷">生活開銷</option>
+                            <option value="家用支出">家用支出</option>
+                            <option value="信用卡費">信用卡費</option>
+                            <option value="保險開銷">保險開銷</option>
+                            <option value="旅遊代墊">旅遊代墊</option>
+                            <option value="其它">其它</option>
+                        </select>
+                    </div>
+                    <div class="flex gap-3 pt-3">
+                        <button type="button" @click="closeModal" class="w-1/2 bg-darkBg hover:bg-borderCol border border-borderCol transition text-gray-300 font-medium py-2.5 rounded-xl text-sm cursor-pointer">
+                            取消
+                        </button>
+                        <button type="submit" :class="isEditing ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/25' : 'bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 shadow-rose-500/25'" class="w-1/2 transition text-white font-medium py-2.5 rounded-xl text-sm shadow-lg cursor-pointer">
+                            {{ isEditing ? '儲存修改' : '確認新增' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ================= 頂部標題與年份/月份切換列 ================= -->
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-borderCol pb-5 gap-4">
+            <div>
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                        <i class="fa-solid fa-wallet text-lg"></i>
+                    </div>
+                    <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-white">個人日常收支與全年摘要管理</h1>
+                </div>
+                <p class="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
+                    <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    資料已與 Google 試算表雲端同步 (ID: 16JQJXIZXfkNsoIHOuuipvJaEah_Bbq2U0UdXo5n2HSA)
+                </p>
+            </div>
+            <!-- 年份與月份切換器 -->
+            <div class="flex items-center gap-3 bg-cardBg p-2 rounded-2xl border border-borderCol shadow-xl">
+                <select v-model.number="selectedYear" @change="onYearChange" class="bg-darkBg text-white font-semibold text-sm border border-borderCol rounded-xl px-3 py-2 focus:outline-none focus:border-accentBlue cursor-pointer transition">
+                    <option v-for="y in availableYears" :key="y" :value="y">{{ y }} 年</option>
+                </select>
+                <div class="flex items-center gap-2 border-l border-borderCol pl-3">
+                    <button @click="changeMonth(-1)" class="w-8 h-8 rounded-xl bg-darkBg hover:bg-borderCol transition text-sm flex items-center justify-center text-gray-300 cursor-pointer">
+                        <i class="fa-solid fa-chevron-left text-xs"></i>
+                    </button>
+                    <span class="font-bold text-sm min-w-[55px] text-center text-accentBlue">{{ currentMonthNum }} 月</span>
+                    <button @click="changeMonth(1)" class="w-8 h-8 rounded-xl bg-darkBg hover:bg-borderCol transition text-sm flex items-center justify-center text-gray-300 cursor-pointer">
+                        <i class="fa-solid fa-chevron-right text-xs"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- ================= 功能頁籤切換 ================= -->
+        <div class="flex gap-2.5 mb-6 border-b border-borderCol pb-3 overflow-x-auto">
+            <button @click="activeTab = 'transactions'" 
+                :class="activeTab === 'transactions' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20 border-transparent' : 'bg-cardBg text-gray-400 hover:text-white border-borderCol hover:border-gray-700'"
+                class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i class="fa-solid fa-list-check"></i> 日常開銷明細
+            </button>
+            <button @click="activeTab = 'summary'" 
+                :class="activeTab === 'summary' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20 border-transparent' : 'bg-cardBg text-gray-400 hover:text-white border-borderCol hover:border-gray-700'"
+                class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i class="fa-solid fa-calendar-days"></i> {{ selectedYear }} 年收支摘要總表
+            </button>
+            <button @click="activeTab = 'funds'" 
+                :class="activeTab === 'funds' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20 border-transparent' : 'bg-cardBg text-gray-400 hover:text-white border-borderCol hover:border-gray-700'"
+                class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i class="fa-solid fa-chart-line"></i> {{ selectedYear }} 年基金投資記錄
+            </button>
+            <button @click="activeTab = 'assets'" 
+                :class="activeTab === 'assets' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20 border-transparent' : 'bg-cardBg text-gray-400 hover:text-white border-borderCol hover:border-gray-700'"
+                class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
+                <i class="fa-solid fa-landmark"></i> 資產負債紀錄
+            </button>
+        </div>
+
+        <!-- ================= 頁籤一：日常開銷明細 ================= -->
+        <div v-show="activeTab === 'transactions'">
+            <div class="bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl mb-6">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                    <h2 class="text-xs sm:text-sm font-semibold text-accentBlue flex items-center gap-2">
+                        <i class="fa-solid fa-table-cells"></i> {{ selectedYear }} 年 {{ currentMonthNum }} 月份專屬收支摘要填報
+                    </h2>
+                    <button @click="saveAllSummaries" class="bg-emerald-600 hover:bg-emerald-500 transition text-white px-3.5 py-2 rounded-xl text-xs font-medium shadow-md shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-floppy-disk"></i> 儲存 {{ selectedYear }} 年摘要
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-center border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-darkBg/80 text-gray-400 border-b border-borderCol">
+                                <th class="p-2.5 border-r border-borderCol rounded-l-xl">月份</th>
+                                <th class="p-2.5 border-r border-borderCol text-emerald-400 font-semibold">薪資收入</th>
+                                <th class="p-2.5 border-r border-borderCol">勞健保等</th>
+                                <th class="p-2.5 border-r border-borderCol">額外收入</th>
+                                <th class="p-2.5 border-r border-borderCol text-rose-400 font-semibold">生活開銷 (自動加總)</th>
+                                <th class="p-2.5 border-r border-borderCol">保險開銷</th>
+                                <th class="p-2.5 border-r border-borderCol">其它開銷</th>
+                                <th class="p-2.5 border-r border-borderCol">家庭開銷</th>
+                                <th class="p-2.5 rounded-r-xl">備註</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="bg-darkBg/40 hover:bg-darkBg transition">
+                                <td class="p-3 border-r border-borderCol text-accentBlue font-bold">{{ currentMonthNum }} 月</td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.salary" placeholder="0" class="w-24 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.insurance" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.extraIncome" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol bg-rose-500/5 text-rose-400 font-bold">{{ formatMoney(currentSummary.livingExpense) }}</td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.insuranceExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.otherExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.familyExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3"><input type="text" v-model="currentSummary.note" placeholder="備註" class="w-32 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 左側：開銷清單 (佔 2 欄) -->
+                <div class="lg:col-span-2 space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="font-semibold text-gray-200 text-base flex items-center gap-2">
+                            <span>{{ selectedYear }} 年 {{ currentMonthNum }} 月份開銷明細</span>
+                            <span class="text-xs bg-cardBg border border-borderCol px-2.5 py-0.5 rounded-full text-gray-400">{{ filteredTransactions.length }} 筆</span>
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <button @click="openAddModal" class="bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 transition text-white px-3.5 py-2 rounded-xl text-xs font-medium shadow-md shadow-rose-500/20 flex items-center gap-1.5 cursor-pointer">
+                                <i class="fa-solid fa-circle-plus"></i> 記一筆
+                            </button>
+                            <button @click="fetchData" class="text-xs text-accentBlue hover:text-white transition flex items-center gap-1 cursor-pointer bg-cardBg px-3 py-2 rounded-xl border border-borderCol hover:border-gray-600" title="重新整理">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bg-cardBg rounded-3xl border border-borderCol shadow-xl overflow-hidden">
+                        <div class="overflow-x-auto max-h-[520px] overflow-y-auto">
+                            <table class="w-full text-left border-collapse text-sm">
+                                <thead class="sticky top-0 bg-[#18181f]/95 backdrop-blur-md z-10 border-b border-borderCol">
+                                    <tr class="text-gray-400 text-xs">
+                                        <th class="p-4 pl-5">日期</th>
+                                        <th class="p-4">項目名稱</th>
+                                        <th class="p-4">分類</th>
+                                        <th class="p-4 text-right">金額</th>
+                                        <th class="p-4 text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-borderCol/40">
+                                    <tr v-if="filteredTransactions.length === 0">
+                                        <td colspan="5" class="text-center py-12 text-gray-500 text-sm">尚無當月開銷紀錄。</td>
+                                    </tr>
+                                    <tr v-for="item in filteredTransactions" :key="item.id" class="hover:bg-darkBg/50 transition">
+                                        <td class="p-4 pl-5 text-gray-400 text-xs font-mono">{{ formatDate(item.date) }}</td>
+                                        <td class="p-4 font-medium text-gray-200">{{ item.title }}</td>
+                                        <td class="p-4">
+                                            <span class="px-2.5 py-1 rounded-xl text-xs font-medium bg-darkBg border border-borderCol text-gray-300 inline-block">
+                                                {{ item.category }}
+                                            </span>
+                                        </td>
+                                        <td class="p-4 text-right font-semibold text-gray-100 font-mono">NT$ {{ formatMoney(item.amount) }}</td>
+                                        <td class="p-4 text-center space-x-1">
+                                            <button @click="openEditModal(item)" class="w-8 h-8 rounded-lg bg-darkBg hover:bg-blue-500/15 text-accentBlue hover:text-blue-400 transition cursor-pointer inline-flex items-center justify-center text-xs" title="編輯">
+                                                <i class="fa-solid fa-pen"></i>
+                                            </button>
+                                            <button @click="deleteTransaction(item.id)" class="w-8 h-8 rounded-lg bg-darkBg hover:bg-rose-500/15 text-accentRed hover:text-rose-400 transition cursor-pointer inline-flex items-center justify-center text-xs" title="刪除">
+                                                <i class="fa-solid fa-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右側：各分類開銷累計 -->
+                <div class="space-y-4">
+                    <h2 class="font-semibold text-gray-200 text-base flex items-center gap-2">
+                        <i class="fa-solid fa-chart-pie text-accentBlue"></i> 各分類開銷累計
+                    </h2>
+                    <div class="bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl space-y-3">
+                        <div v-for="(amount, category) in categoryTotals" :key="category" class="flex justify-between items-center p-3.5 bg-darkBg/60 rounded-2xl border border-borderCol/60 hover:border-gray-700 transition">
+                            <span class="text-sm font-medium text-gray-300 flex items-center gap-2.5">
+                                <span class="w-2 h-2 rounded-full bg-accentBlue"></span> {{ category }}
+                            </span>
+                            <span class="text-sm font-bold text-gray-100 font-mono">NT$ {{ formatMoney(amount) }}</span>
+                        </div>
+                        <div v-if="Object.keys(categoryTotals).length === 0" class="text-center py-12 text-gray-500 text-sm">尚無分類開銷資料。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 頁籤二：全年 12 個月收支摘要總表 ================= -->
+        <div v-show="activeTab === 'summary'">
+            <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl mb-8">
+                <div class="flex justify-between items-center mb-5">
+                    <h2 class="text-base font-semibold flex items-center gap-2 text-white">
+                        <i class="fa-solid fa-calendar-days text-accentBlue"></i> {{ selectedYear }} 年 12 個月收支摘要總表
+                    </h2>
+                    <button @click="saveAllSummaries" class="bg-emerald-600 hover:bg-emerald-500 transition text-white px-4 py-2.5 rounded-xl text-xs font-medium shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer">
+                        <i class="fa-solid fa-floppy-disk"></i> 儲存 {{ selectedYear }} 年摘要至雲端
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-center border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-darkBg/80 text-gray-400 border-b border-borderCol">
+                                <th class="p-3 border-r border-borderCol rounded-l-xl">月份</th>
+                                <th class="p-3 border-r border-borderCol text-emerald-400 font-semibold">薪資收入</th>
+                                <th class="p-3 border-r border-borderCol">勞健保等</th>
+                                <th class="p-3 border-r border-borderCol">額外收入</th>
+                                <th class="p-3 border-r border-borderCol text-rose-400 font-semibold">生活開銷 (自動加總)</th>
+                                <th class="p-3 border-r border-borderCol">保險開銷</th>
+                                <th class="p-3 border-r border-borderCol">其它開銷</th>
+                                <th class="p-3 border-r border-borderCol">家庭開銷</th>
+                                <th class="p-3 rounded-r-xl">備註</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-borderCol/40">
+                            <tr v-for="m in 12" :key="m" class="hover:bg-darkBg/60 transition" :class="m === currentMonthNum ? 'bg-blue-500/5 font-bold' : ''">
+                                <td class="p-3 border-r border-borderCol text-accentBlue font-bold">{{ m }} 月</td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].salary" placeholder="0" class="w-24 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].insurance" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].extraIncome" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol bg-rose-500/5 text-rose-400 font-bold">{{ formatMoney(currentYearSummaries[m].livingExpense) }}</td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].insuranceExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].otherExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].familyExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                                <td class="p-3"><input type="text" v-model="currentYearSummaries[m].note" placeholder="備註" class="w-32 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 頁籤：基金投資記錄 ================= -->
+        <div v-show="activeTab === 'funds'">
+            <div class="space-y-8">
+                <div class="flex justify-between items-center bg-cardBg p-5 rounded-3xl border border-borderCol shadow-xl">
+                    <div>
+                        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-chart-line text-accentBlue"></i> {{ selectedYear }} 年基金與投資績效總記錄
+                        </h2>
+                        <p class="text-xs text-gray-400 mt-1">總收益已自動扣除手續費總計</p>
+                    </div>
+                    <button @click="saveFundsRecord" class="bg-emerald-600 hover:bg-emerald-500 transition text-white px-4 py-2.5 rounded-xl text-xs font-medium shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer">
+                        <i class="fa-solid fa-floppy-disk"></i> 儲存 {{ selectedYear }} 年基金記錄
+                    </button>
+                </div>
+
+                <!-- 1. 安泰 台幣 -->
+                <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl">
+                    <div class="flex justify-between items-center mb-4 border-b border-borderCol pb-3">
+                        <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2">
+                            <i class="fa-solid fa-coins"></i> 投資記錄 - 安泰 台幣 (每月底記錄)
+                        </h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-center border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-darkBg/80 text-gray-400 border-b border-borderCol">
+                                    <th class="p-2.5 border-r border-borderCol">月份</th>
+                                    <th class="p-2.5 border-r border-borderCol">利息</th>
+                                    <th class="p-2.5 border-r border-borderCol">當月投資</th>
+                                    <th class="p-2.5 border-r border-borderCol">手續費</th>
+                                    <th class="p-2.5 border-r border-borderCol">總投資額 (可編輯)</th>
+                                    <th class="p-2.5 border-r border-borderCol">現值</th>
+                                    <th class="p-2.5 border-r border-borderCol">淨利</th>
+                                    <th class="p-2.5">備註</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-borderCol/40">
+                                <!-- 基準列 (前一年12月) -->
+                                <tr class="bg-amber-500/10 font-bold">
+                                    <td class="p-2.5 border-r border-borderCol text-amber-400">{{ selectedYear - 1 }}/12 (基準)</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.entieTWD.baseTotalInv" placeholder="" class="w-28 bg-darkBg border border-amber-500/40 rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.entieTWD.baseValue" placeholder="" class="w-28 bg-darkBg border border-amber-500/40 rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol font-mono" :class="getEntieTWDBaseNetProfit() >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                        {{ formatMoney(getEntieTWDBaseNetProfit()) }}
+                                    </td>
+                                    <td class="p-2.5"><input type="text" v-model="currentFundsData.entieTWD.baseNote" placeholder="備註" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                </tr>
+                                <!-- 1~12月 -->
+                                <tr v-for="m in 12" :key="m" class="hover:bg-darkBg/50 transition">
+                                    <td class="p-2.5 border-r border-borderCol text-accentBlue font-bold">{{ m }} 月</td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieTWD.months[m].interest" placeholder="" class="w-24 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.entieTWD.months[m].investment" placeholder="" class="w-20 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.entieTWD.months[m].fee" placeholder="" class="w-20 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.entieTWD.months[m].totalInvestment" placeholder="" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white font-mono"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.entieTWD.months[m].value" placeholder="" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol font-mono" :class="getEntieTWDNetProfit(m) >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                        {{ formatMoney(getEntieTWDNetProfit(m)) }}
+                                    </td>
+                                    <td class="p-2.5"><input type="text" v-model="currentFundsData.entieTWD.months[m].note" placeholder="備註" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr class="bg-darkBg font-bold text-accentRed border-t border-borderCol">
+                                    <td class="p-3 border-r border-borderCol">總計</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ formatMoney(sumEntieTWDField('interest')) }}</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ formatMoney(sumEntieTWDField('investment')) }}</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ formatMoney(sumEntieTWDField('fee')) }}</td>
+                                    <td class="p-3 border-r border-borderCol">-</td>
+                                    <td class="p-3 border-r border-borderCol">-</td>
+                                    <td class="p-3 border-r border-borderCol font-mono" :class="sumEntieTWDNetProfit() >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ formatMoney(sumEntieTWDNetProfit()) }}</td>
+                                    <td class="p-3">總收益: {{ formatMoney(sumEntieTWDField('interest') + sumEntieTWDNetProfit() - sumEntieTWDField('fee')) }}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 2. 安泰 美金 -->
+                <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl">
+                    <div class="flex justify-between items-center mb-4 border-b border-borderCol pb-3">
+                        <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2">
+                            <i class="fa-solid fa-dollar-sign"></i> 投資記錄 - 安泰 美金 (每月底記錄)
+                        </h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-center border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-darkBg/80 text-gray-400 border-b border-borderCol">
+                                    <th class="p-2.5 border-r border-borderCol">月份</th>
+                                    <th class="p-2.5 border-r border-borderCol">利息</th>
+                                    <th class="p-2.5 border-r border-borderCol">當月投資</th>
+                                    <th class="p-2.5 border-r border-borderCol">手續費</th>
+                                    <th class="p-2.5 border-r border-borderCol">總投資額 ($ 可編輯)</th>
+                                    <th class="p-2.5 border-r border-borderCol">現值 ($)</th>
+                                    <th class="p-2.5 border-r border-borderCol">淨利 ($)</th>
+                                    <th class="p-2.5">備註</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-borderCol/40">
+                                <!-- 基準列 -->
+                                <tr class="bg-amber-500/10 font-bold">
+                                    <td class="p-2.5 border-r border-borderCol text-amber-400">{{ selectedYear - 1 }}/12 (基準)</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieUSD.baseTotalInv" placeholder="" class="w-28 bg-darkBg border border-amber-500/40 rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieUSD.baseValue" placeholder="" class="w-28 bg-darkBg border border-amber-500/40 rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol font-mono" :class="getEntieUSDBaseNetProfit() >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                        {{ getEntieUSDBaseNetProfit().toFixed(2) }}
+                                    </td>
+                                    <td class="p-2.5"><input type="text" v-model="currentFundsData.entieUSD.baseNote" placeholder="備註" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                </tr>
+                                <!-- 1~12月 -->
+                                <tr v-for="m in 12" :key="m" class="hover:bg-darkBg/50 transition">
+                                    <td class="p-2.5 border-r border-borderCol text-accentBlue font-bold">{{ m }} 月</td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieUSD.months[m].interest" placeholder="" class="w-24 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieUSD.months[m].investment" placeholder="" class="w-20 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieUSD.months[m].fee" placeholder="" class="w-20 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieUSD.months[m].totalInvestment" placeholder="" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white font-mono"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.entieUSD.months[m].value" placeholder="" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol font-mono" :class="getEntieUSDNetProfit(m) >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                        {{ getEntieUSDNetProfit(m).toFixed(2) }}
+                                    </td>
+                                    <td class="p-2.5"><input type="text" v-model="currentFundsData.entieUSD.months[m].note" placeholder="備註" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr class="bg-darkBg font-bold text-accentRed border-t border-borderCol">
+                                    <td class="p-3 border-r border-borderCol">總計 ($)</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ sumEntieUSDField('interest').toFixed(2) }}</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ sumEntieUSDField('investment').toFixed(2) }}</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ sumEntieUSDField('fee').toFixed(2) }}</td>
+                                    <td class="p-3 border-r border-borderCol">-</td>
+                                    <td class="p-3 border-r border-borderCol">-</td>
+                                    <td class="p-3 border-r border-borderCol font-mono" :class="sumEntieUSDNetProfit() >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ sumEntieUSDNetProfit().toFixed(2) }}</td>
+                                    <td class="p-3">總收益: {{ (sumEntieUSDField('interest') + sumEntieUSDNetProfit() - sumEntieUSDField('fee')).toFixed(2) }}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 3. 安聯 -->
+                <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl">
+                    <div class="flex justify-between items-center mb-4 border-b border-borderCol pb-3">
+                        <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-pie"></i> 投資記錄 - 安聯 (每月底記錄)
+                        </h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-center border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-darkBg/80 text-gray-400 border-b border-borderCol">
+                                    <th class="p-2.5 border-r border-borderCol">月份</th>
+                                    <th class="p-2.5 border-r border-borderCol">利息(美金)</th>
+                                    <th class="p-2.5 border-r border-borderCol">交易匯率</th>
+                                    <th class="p-2.5 border-r border-borderCol">當月投資 (自動計算)</th>
+                                    <th class="p-2.5 border-r border-borderCol">手續費</th>
+                                    <th class="p-2.5 border-r border-borderCol">總投資額 (可編輯)</th>
+                                    <th class="p-2.5 border-r border-borderCol">現值</th>
+                                    <th class="p-2.5 border-r border-borderCol">淨利</th>
+                                    <th class="p-2.5">備註</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-borderCol/40">
+                                <!-- 基準列 -->
+                                <tr class="bg-amber-500/10 font-bold">
+                                    <td class="p-2.5 border-r border-borderCol text-amber-400">{{ selectedYear - 1 }}/12 (基準)</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol">-</td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.allianz.baseTotalInv" placeholder="" class="w-28 bg-darkBg border border-amber-500/40 rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.allianz.baseValue" placeholder="" class="w-28 bg-darkBg border border-amber-500/40 rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol font-mono" :class="getAllianzBaseNetProfit() >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                        {{ formatMoney(getAllianzBaseNetProfit()) }}
+                                    </td>
+                                    <td class="p-2.5"><input type="text" v-model="currentFundsData.allianz.baseNote" placeholder="備註" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                </tr>
+                                <!-- 1~12月 -->
+                                <tr v-for="m in 12" :key="m" class="hover:bg-darkBg/50 transition">
+                                    <td class="p-2.5 border-r border-borderCol text-accentBlue font-bold">{{ m }} 月</td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.01" v-model.number="currentFundsData.allianz.months[m].interestUSD" @input="updateAllianzInvestment(m)" placeholder="" class="w-24 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" step="0.0001" v-model.number="currentFundsData.allianz.months[m].rate" @input="updateAllianzInvestment(m)" placeholder="" class="w-24 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.allianz.months[m].investment" placeholder="" class="w-20 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white font-mono"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.allianz.months[m].fee" placeholder="" class="w-20 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.allianz.months[m].totalInvestment" placeholder="" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white font-mono"></td>
+                                    <td class="p-2.5 border-r border-borderCol"><input type="number" v-model.number="currentFundsData.allianz.months[m].value" placeholder="" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                    <td class="p-2.5 border-r border-borderCol font-mono" :class="getAllianzNetProfit(m) >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                        {{ formatMoney(getAllianzNetProfit(m)) }}
+                                    </td>
+                                    <td class="p-2.5"><input type="text" v-model="currentFundsData.allianz.months[m].note" placeholder="備註" class="w-28 bg-darkBg border border-borderCol rounded-lg px-2 py-1 text-center text-xs text-white"></td>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr class="bg-darkBg font-bold text-accentRed border-t border-borderCol">
+                                    <td class="p-3 border-r border-borderCol">總計</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ sumAllianzField('interestUSD').toFixed(2) }} ($)</td>
+                                    <td class="p-3 border-r border-borderCol">-</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ formatMoney(sumAllianzField('investment')) }}</td>
+                                    <td class="p-3 border-r border-borderCol font-mono">{{ formatMoney(sumAllianzField('fee')) }}</td>
+                                    <td class="p-3 border-r border-borderCol">-</td>
+                                    <td class="p-3 border-r border-borderCol">-</td>
+                                    <td class="p-3 border-r border-borderCol font-mono" :class="sumAllianzNetProfit() >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ formatMoney(sumAllianzNetProfit()) }}</td>
+                                    <td class="p-3">總收益: {{ formatMoney(sumAllianzNetProfit() - sumAllianzField('fee')) }}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 頁籤三 : 資產負債紀錄 ================= -->
+        <div v-show="activeTab === 'assets'">
+            <div class="bg-cardBg p-6 rounded-3xl border border-borderCol shadow-xl mb-8">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-borderCol pb-5">
+                    <div>
+                        <h2 class="text-base font-semibold flex items-center gap-2 text-white">
+                            <i class="fa-solid fa-landmark text-accentBlue"></i> {{ currentYM }} 月份資產負債與投資清單
+                        </h2>
+                        <p class="text-xs text-gray-400 mt-1">每月定期記錄一次資產狀況，數據將自動同步至雲端試算表。</p>
+                    </div>
+                    <div class="flex items-center gap-4 bg-darkBg/60 px-5 py-3 rounded-2xl border border-borderCol">
+                        <div class="text-right">
+                            <div class="text-[11px] text-gray-400 uppercase tracking-wider">總財產合計</div>
+                            <div class="text-xl font-bold text-emerald-400 font-mono">NT$ {{ formatMoney(totalAssets) }}</div>
+                        </div>
+                        <button @click="saveAssetsRecord" class="bg-emerald-600 hover:bg-emerald-500 transition text-white px-4 py-2.5 rounded-xl text-xs font-medium shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer">
+                            <i class="fa-solid fa-floppy-disk"></i> 儲存資產
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 記帳日期備註 -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 bg-darkBg/50 p-4 rounded-2xl border border-borderCol">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">記錄日期 (備註)</label>
+                        <input type="date" v-model="currentAssetData.date" @click="$event.target.showPicker && $event.target.showPicker()" class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-accentBlue cursor-pointer transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">備註說明</label>
+                        <input type="text" v-model="currentAssetData.note" placeholder="例如：10月結算" class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-accentBlue transition">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- 1. 可動資產與帳戶 -->
+                    <div class="space-y-4">
+                        <h3 class="font-semibold text-accentBlue border-b border-borderCol pb-2.5 text-sm flex justify-between items-center">
+                            <span>1. 可動資產與帳戶</span>
+                            <span class="text-xs text-gray-400 font-mono">NT$ {{ formatMoney(liquidAssetsTotal) }}</span>
+                        </h3>
+                        <div class="space-y-2.5 text-xs">
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">郵局</span><input type="number" v-model.number="currentAssetData.postOffice" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">中國信託 (薪資戶)</span><input type="number" v-model.number="currentAssetData.ctbc" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">永豐銀行 (股票扣款)</span><input type="number" v-model.number="currentAssetData.sinopac" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">安泰銀行</span><input type="number" v-model.number="currentAssetData.entie" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">Line Bank 主</span><input type="number" v-model.number="currentAssetData.lineBank" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">現金</span><input type="number" v-model.number="currentAssetData.cash" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            
+                            <!-- 信用卡群組 -->
+                            <div class="flex justify-between items-center bg-rose-500/5 px-2.5 py-2 rounded-xl border border-rose-500/20"><span class="text-rose-400 font-medium">信用卡 (中信)</span><input type="number" v-model.number="currentAssetData.ccCtbc" class="w-32 bg-darkBg border border-rose-500/30 rounded-lg px-2.5 py-1 text-right text-white focus:border-rose-400 transition"></div>
+                            <div class="flex justify-between items-center bg-rose-500/5 px-2.5 py-2 rounded-xl border border-rose-500/20"><span class="text-rose-400 font-medium">信用卡 (富邦)</span><input type="number" v-model.number="currentAssetData.ccFubon" class="w-32 bg-darkBg border border-rose-500/30 rounded-lg px-2.5 py-1 text-right text-white focus:border-rose-400 transition"></div>
+                            <div class="flex justify-between items-center bg-rose-500/5 px-2.5 py-2 rounded-xl border border-rose-500/20"><span class="text-rose-400 font-medium">信用卡 (元大)</span><input type="number" v-model.number="currentAssetData.ccEsun" class="w-32 bg-darkBg border border-rose-500/30 rounded-lg px-2.5 py-1 text-right text-white focus:border-rose-400 transition"></div>
+                            <div class="flex justify-between items-center bg-rose-500/5 px-2.5 py-2 rounded-xl border border-rose-500/20"><span class="text-rose-400 font-medium">信用卡 (凱基)</span><input type="number" v-model.number="currentAssetData.ccKGI" class="w-32 bg-darkBg border border-rose-500/30 rounded-lg px-2.5 py-1 text-right text-white focus:border-rose-400 transition"></div>
+                            <div class="flex justify-between items-center bg-rose-500/5 px-2.5 py-2 rounded-xl border border-rose-500/20"><span class="text-rose-400 font-medium">信用卡 (星展)</span><input type="number" v-model.number="currentAssetData.ccDBS" class="w-32 bg-darkBg border border-rose-500/30 rounded-lg px-2.5 py-1 text-right text-white focus:border-rose-400 transition"></div>
+
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">行動支付 (街口)</span><input type="number" v-model.number="currentAssetData.payJko" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">行動支付 (LINE)</span><input type="number" v-model.number="currentAssetData.payLine" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">MOMO</span><input type="number" v-model.number="currentAssetData.momo" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">禮券 (萊爾富)</span><input type="number" v-model.number="currentAssetData.voucherHi" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">全聯</span><input type="number" v-model.number="currentAssetData.pxMart" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">宜睿即享券</span><input type="number" v-model.number="currentAssetData.edatan" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">漢來券</span><input type="number" v-model.number="currentAssetData.hanlai" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">其他 (家用)</span><input type="number" v-model.number="currentAssetData.otherHome" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">其他 (家用預支)</span><input type="number" v-model.number="currentAssetData.otherAdvance" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            <div class="flex justify-between items-center p-2 rounded-xl hover:bg-darkBg/50 transition"><span class="text-gray-300">其他 (欠貓咪基金)</span><input type="number" v-model.number="currentAssetData.otherCatFund" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                        </div>
+                    </div>
+
+                    <!-- 2. 投資與保險 -->
+                    <div class="space-y-4">
+                        <h3 class="font-semibold text-accentBlue border-b border-borderCol pb-2.5 text-sm flex justify-between items-center">
+                            <span>2. 投資與保險</span>
+                            <span class="text-xs text-gray-400 font-mono">NT$ {{ formatMoney(investmentTotal) }}</span>
+                        </h3>
+                        <div class="space-y-3 text-xs">
+                            <div class="bg-darkBg/60 p-3 rounded-2xl border border-borderCol/60 space-y-2">
+                                <div class="font-semibold text-gray-200">投資 - 安泰 (台幣)</div>
+                                <div class="flex justify-between items-center"><span class="text-gray-400">現值</span><input type="number" v-model.number="currentAssetData.invEntieTWD" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            </div>
+                            
+                            <div class="bg-darkBg/60 p-3.5 rounded-2xl border border-borderCol/60 space-y-2.5">
+                                <div class="flex justify-between items-center font-semibold text-gray-200">
+                                    <span>投資 - 安泰 (美金)</span>
+                                    <span class="text-emerald-400 font-mono">NT$ {{ formatMoney(invEntieUSD_TWD) }}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">原幣金額 ($)</span>
+                                        <input type="number" v-model.number="currentAssetData.rawEntieUSD" placeholder="0" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">匯率 (TWD/USD)</span>
+                                        <input type="number" step="0.01" v-model.number="currentAssetData.rateEntieUSD" placeholder="32.14" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-darkBg/60 p-3 rounded-2xl border border-borderCol/60 space-y-2">
+                                <div class="font-semibold text-gray-200">投資 - 安聯</div>
+                                <div class="flex justify-between items-center"><span class="text-gray-400">現值</span><input type="number" v-model.number="currentAssetData.invAllianz" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            </div>
+                            <div class="bg-darkBg/60 p-3 rounded-2xl border border-borderCol/60 space-y-2">
+                                <div class="font-semibold text-gray-200">遠雄保險</div>
+                                <div class="flex justify-between items-center"><span class="text-gray-400">現值</span><input type="number" v-model.number="currentAssetData.insFarglory" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            </div>
+                            <div class="bg-darkBg/60 p-3 rounded-2xl border border-borderCol/60 space-y-2">
+                                <div class="font-semibold text-gray-200">全球保險</div>
+                                <div class="flex justify-between items-center"><span class="text-gray-400">現值</span><input type="number" v-model.number="currentAssetData.insGlobal" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            </div>
+                            <div class="bg-darkBg/60 p-3 rounded-2xl border border-borderCol/60 space-y-2">
+                                <div class="font-semibold text-gray-200">台幣定存</div>
+                                <div class="flex justify-between items-center"><span class="text-gray-400">金額</span><input type="number" v-model.number="currentAssetData.twdSavings" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            </div>
+                            <div class="bg-darkBg/60 p-3 rounded-2xl border border-borderCol/60 space-y-2">
+                                <div class="font-semibold text-gray-200">ETF 存股</div>
+                                <div class="flex justify-between items-center"><span class="text-gray-400">金額</span><input type="number" v-model.number="currentAssetData.etfStock" class="w-32 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-right text-white focus:border-accentBlue transition"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. 外幣現金資產 -->
+                    <div class="space-y-4">
+                        <h3 class="font-semibold text-accentBlue border-b border-borderCol pb-2.5 text-sm flex justify-between items-center">
+                            <span>3. 外幣現金資產</span>
+                            <span class="text-xs text-gray-400 font-mono">NT$ {{ formatMoney(foreignCashTotal) }}</span>
+                        </h3>
+                        <div class="space-y-3 text-xs">
+                            <!-- 日幣 -->
+                            <div class="bg-darkBg/60 p-3.5 rounded-2xl border border-borderCol/60 space-y-2.5">
+                                <div class="flex justify-between items-center font-semibold text-gray-200">
+                                    <span>日幣現金</span>
+                                    <span class="text-emerald-400 font-mono">NT$ {{ formatMoney(currJPY_TWD) }}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">原幣金額 (¥)</span>
+                                        <input type="number" v-model.number="currentAssetData.rawJPY" placeholder="0" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">匯率 (TWD/JPY)</span>
+                                        <input type="number" step="0.0001" v-model.number="currentAssetData.rateJPY" placeholder="0.21" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 美金 -->
+                            <div class="bg-darkBg/60 p-3.5 rounded-2xl border border-borderCol/60 space-y-2.5">
+                                <div class="flex justify-between items-center font-semibold text-gray-200">
+                                    <span>美金現金</span>
+                                    <span class="text-emerald-400 font-mono">NT$ {{ formatMoney(currUSD_TWD) }}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">原幣金額 ($)</span>
+                                        <input type="number" v-model.number="currentAssetData.rawUSD" placeholder="0" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">匯率 (TWD/USD)</span>
+                                        <input type="number" step="0.01" v-model.number="currentAssetData.rateUSD" placeholder="32.0" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 港幣 -->
+                            <div class="bg-darkBg/60 p-3.5 rounded-2xl border border-borderCol/60 space-y-2.5">
+                                <div class="flex justify-between items-center font-semibold text-gray-200">
+                                    <span>港幣現金</span>
+                                    <span class="text-emerald-400 font-mono">NT$ {{ formatMoney(currHKD_TWD) }}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">原幣金額 (HK$)</span>
+                                        <input type="number" v-model.number="currentAssetData.rawHKD" placeholder="0" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                    <div>
+                                        <span class="text-[10px] text-gray-400 block mb-1">匯率 (TWD/HKD)</span>
+                                        <input type="number" step="0.01" v-model.number="currentAssetData.rateHKD" placeholder="4.1" class="w-full bg-darkBg border border-borderCol rounded-lg px-2.5 py-1.5 text-right text-white focus:outline-none focus:border-accentBlue transition">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 總財產摘要卡片 -->
+                        <div class="bg-gradient-to-br from-darkBg to-[#18181f] p-5 rounded-3xl border border-borderCol space-y-3 mt-6 shadow-xl">
+                            <h4 class="font-semibold text-sm text-white border-b border-borderCol pb-2.5 flex items-center gap-2">
+                                <i class="fa-solid fa-chart-line text-emerald-400"></i> 資產總結算
+                            </h4>
+                            <div class="flex justify-between text-xs"><span class="text-gray-400">可動資產合計</span><span class="font-semibold text-white font-mono">NT$ {{ formatMoney(liquidAssetsTotal) }}</span></div>
+                            <div class="flex justify-between text-xs"><span class="text-gray-400">投資與保險總計</span><span class="font-semibold text-white font-mono">NT$ {{ formatMoney(investmentTotal) }}</span></div>
+                            <div class="flex justify-between text-xs"><span class="text-gray-400">外幣現金合計</span><span class="font-semibold text-white font-mono">NT$ {{ formatMoney(foreignCashTotal) }}</span></div>
+                            <div class="flex justify-between text-sm pt-3 border-t border-borderCol font-bold text-emerald-400">
+                                <span>總財產 (Total)</span>
+                                <span class="font-mono text-base">NT$ {{ formatMoney(totalAssets) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 頁尾 ================= -->
+        <footer class="mt-16 pt-6 border-t border-borderCol flex flex-col sm:flex-row justify-between items-center text-xs text-gray-500 gap-2">
+            <div>資料 100% 同步於 Google 試算表雲端 (明細與全年摘要)</div>
+            <div>Powered by Vue 3 & Google Apps Script API</div>
+        </footer>
+    </div>
+
+    <!-- 隱藏尚未渲染完成的模板 -->
+    <style>
+        [v-cloak] { display: none; }
+    </style>
+
+    <!-- ================= Vue.js 前端邏輯 ================= -->
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue
+
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbzkfOECinKHSsOVo3nX5Oam2Cme3v2S_w5FemjcEjGDssRUNnlHm7DR3B3dRmwdTZfN/exec';
+
+        createApp({
+            setup() {
+                const activeTab = ref('transactions')
+                const currentMonthNum = ref(new Date().getMonth() + 1)
+                const selectedYear = ref(new Date().getFullYear())
+
+                const availableYears = computed(() => {
+                    const currentY = new Date().getFullYear();
+                    const years = [currentY - 2, currentY - 1, currentY, currentY + 1, currentY + 2];
+                    transactions.value.forEach(item => {
+                        if (item.date) {
+                            const yr = new Date(item.date).getFullYear();
+                            if (!isNaN(yr) && !years.includes(yr)) years.push(yr);
+                        }
+                    });
+                    return years.sort((a, b) => a - b);
+                });
+
+                const isSubmitting = ref(false)
+                const showSuccessToast = ref(false)
+                const showModal = ref(false)
+                const toastMessage = ref('寫入成功！')
+
+                // 編輯狀態控制
+                const isEditing = ref(false)
+                const editingId = ref(null)
+
+                const form = ref({
+                    date: new Date().toISOString().slice(0, 10),
+                    title: '',
+                    amount: '',
+                    category: '生活開銷'
+                })
+
+                // 常用快速點選項目清單（支援自定義與 localStorage 持久化）
+                const savedCommonItems = localStorage.getItem('budget_common_items');
+                const commonItems = ref(savedCommonItems ? JSON.parse(savedCommonItems) : ['午餐', '晚餐', '早餐', '飲料/咖啡', '加油', '停車費', '超商購物', '網購']);
+                const newCustomItem = ref('');
+
+                const addCustomItem = () => {
+                    const trimmed = newCustomItem.value.trim();
+                    if (trimmed && !commonItems.value.includes(trimmed)) {
+                        commonItems.value.push(trimmed);
+                        localStorage.setItem('budget_common_items', JSON.stringify(commonItems.value));
+                        newCustomItem.value = '';
+                    }
+                };
+
+                const removeCustomItem = (item) => {
+                    commonItems.value = commonItems.value.filter(i => i !== item);
+                    localStorage.setItem('budget_common_items', JSON.stringify(commonItems.value));
+                };
+
+                // 日期格式化輔助：確保帶入 <input type="date"> 時為 YYYY-MM-DD
+                const formatDateForInput = (dateStr) => {
+                    if (!dateStr) return new Date().toISOString().slice(0, 10);
+                    try {
+                        const d = new Date(dateStr);
+                        if (isNaN(d.getTime())) return String(dateStr).slice(0, 10);
+                        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    } catch (e) { return dateStr; }
+                };
+
+                const openAddModal = () => {
+                    isEditing.value = false;
+                    editingId.value = null;
+                    form.value = {
+                        date: new Date().toISOString().slice(0, 10),
+                        title: '',
+                        amount: '',
+                        category: '生活開銷'
+                    };
+                    showModal.value = true;
+                }
+
+                const openEditModal = (item) => {
+                    isEditing.value = true;
+                    editingId.value = item.id;
+                    form.value = {
+                        date: formatDateForInput(item.date),
+                        title: item.title,
+                        amount: item.amount,
+                        category: item.category
+                    };
+                    showModal.value = true;
+                }
+
+                const closeModal = () => {
+                    showModal.value = false;
+                }
+
+                // 多年份摘要結構
+                const allSummaries = ref({});
+                const initYearStructure = (year) => {
+                    if (!allSummaries.value[year]) {
+                        allSummaries.value[year] = {};
+                        for (let m = 1; m <= 12; m++) {
+                            allSummaries.value[year][m] = {
+                                salary: 0, insurance: 0, extraIncome: 0, livingExpense: 0,
+                                insuranceExpense: 0, otherExpense: 0, familyExpense: 0, note: ''
+                            };
+                        }
+                    }
+                };
+
+                // 基金投資記錄結構
+                const fundsRecords = ref({});
+                const initFundsStructure = (year) => {
+                    if (!fundsRecords.value[year]) {
+                        fundsRecords.value[year] = {
+                            entieTWD: { baseTotalInv: '', baseValue: '', baseNote: '', months: {} },
+                            entieUSD: { baseTotalInv: '', baseValue: '', baseNote: '', months: {} },
+                            allianz: { baseTotalInv: '', baseValue: '', baseNote: '', months: {} }
+                        };
+                        for (let m = 1; m <= 12; m++) {
+                            fundsRecords.value[year].entieTWD.months[m] = { interest: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
+                            fundsRecords.value[year].entieUSD.months[m] = { interest: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
+                            fundsRecords.value[year].allianz.months[m] = { interestUSD: '', rate: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
+                        }
+                    }
+                };
+
+                const currentFundsData = computed(() => {
+                    initFundsStructure(selectedYear.value);
+                    return fundsRecords.value[selectedYear.value];
+                });
+
+                // 安聯當月投資自動計算公式：2000 + (利息(美金) * 交易匯率)
+                const updateAllianzInvestment = (m) => {
+                    const row = currentFundsData.value.allianz.months[m];
+                    const interestUSD = Number(row.interestUSD || 0);
+                    const rate = Number(row.rate || 0);
+                    row.investment = Math.round(2000 + (interestUSD * rate));
+                };
+
+                // 取得當年度最後一個有填寫現值的月份
+                const getLatestActiveMonth = (monthsObj) => {
+                    for (let m = 12; m >= 1; m--) {
+                        if (monthsObj[m] && Number(monthsObj[m].value) > 0) return m;
+                    }
+                    return Math.min(new Date().getMonth() + 1, 12);
+                };
+
+                // 安泰台幣計算
+                const getEntieTWDBaseNetProfit = () => {
+                    const d = currentFundsData.value.entieTWD;
+                    return Number(d.baseValue || 0) - Number(d.baseTotalInv || 0);
+                };
+                const getEntieTWDNetProfit = (m) => {
+                    const row = currentFundsData.value.entieTWD.months[m];
+                    return Number(row.value || 0) - Number(row.totalInvestment || 0);
+                };
+                const sumEntieTWDField = (field) => {
+                    let sum = 0;
+                    for (let m = 1; m <= 12; m++) {
+                        sum += Number(currentFundsData.value.entieTWD.months[m][field] || 0);
+                    }
+                    return sum;
+                };
+                const sumEntieTWDNetProfit = () => {
+                    const monthsObj = currentFundsData.value.entieTWD.months;
+                    const activeM = getLatestActiveMonth(monthsObj);
+                    const currentNet = getEntieTWDNetProfit(activeM);
+                    const baseNet = getEntieTWDBaseNetProfit();
+                    return currentNet - baseNet;
+                };
+
+                // 安泰美金計算
+                const getEntieUSDBaseNetProfit = () => {
+                    const d = currentFundsData.value.entieUSD;
+                    return Number(d.baseValue || 0) - Number(d.baseTotalInv || 0);
+                };
+                const getEntieUSDNetProfit = (m) => {
+                    const row = currentFundsData.value.entieUSD.months[m];
+                    return Number(row.value || 0) - Number(row.totalInvestment || 0);
+                };
+                const sumEntieUSDField = (field) => {
+                    let sum = 0;
+                    for (let m = 1; m <= 12; m++) {
+                        sum += Number(currentFundsData.value.entieUSD.months[m][field] || 0);
+                    }
+                    return sum;
+                };
+                const sumEntieUSDNetProfit = () => {
+                    const monthsObj = currentFundsData.value.entieUSD.months;
+                    const activeM = getLatestActiveMonth(monthsObj);
+                    const currentNet = getEntieUSDNetProfit(activeM);
+                    const baseNet = getEntieUSDBaseNetProfit();
+                    return currentNet - baseNet;
+                };
+
+                // 安聯計算
+                const getAllianzBaseNetProfit = () => {
+                    const d = currentFundsData.value.allianz;
+                    return Number(d.baseValue || 0) - Number(d.baseTotalInv || 0);
+                };
+                const getAllianzNetProfit = (m) => {
+                    const row = currentFundsData.value.allianz.months[m];
+                    return Number(row.value || 0) - Number(row.totalInvestment || 0);
+                };
+                const sumAllianzField = (field) => {
+                    let sum = 0;
+                    for (let m = 1; m <= 12; m++) {
+                        sum += Number(currentFundsData.value.allianz.months[m][field] || 0);
+                    }
+                    return sum;
+                };
+                const sumAllianzNetProfit = () => {
+                    const monthsObj = currentFundsData.value.allianz.months;
+                    const activeM = getLatestActiveMonth(monthsObj);
+                    const currentNet = getAllianzNetProfit(activeM);
+                    const baseNet = getAllianzBaseNetProfit();
+                    return currentNet - baseNet;
+                };
+
+                const saveFundsRecord = async () => {
+                    isSubmitting.value = true;
+                    try {
+                        await fetch(GAS_URL, {
+                            method: 'POST', mode: 'no-cors',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: "saveFunds", fundsRecords: fundsRecords.value })
+                        });
+                        isSubmitting.value = false;
+                        toastMessage.value = `${selectedYear.value} 年基金投資記錄儲存成功！`;
+                        showSuccessToast.value = true;
+                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
+                    } catch (err) {
+                        isSubmitting.value = false;
+                        alert('儲存基金記錄發生錯誤');
+                    }
+                };
+
+                // 資產負債紀錄結構
+                const assetsRecords = ref({});
+                const currentYM = computed(() => {
+                    const mStr = String(currentMonthNum.value).padStart(2, '0');
+                    return `${selectedYear.value}-${mStr}`;
+                });
+
+                const emptyAssetTemplate = () => ({
+                    date: new Date().toISOString().slice(0, 10),
+                    postOffice: 0, ctbc: 0, sinopac: 0, entie: 0, lineBank: 0, cash: 0,
+                    ccCtbc: 0, ccFubon: 0, ccEsun: 0, ccKGI: 0, ccDBS: 0,
+                    payJko: 0, payLine: 0, momo: 0, voucherHi: 0, pxMart: 0, edatan: 0, hanlai: 0,
+                    otherHome: 0, otherAdvance: 0, otherCatFund: 0,
+                    invEntieTWD: 0, 
+                    rawEntieUSD: 0, rateEntieUSD: 32.14, invEntieUSD: 0,
+                    invAllianz: 0, insFarglory: 0, insGlobal: 0, twdSavings: 0, etfStock: 0,
+                    rawJPY: 0, rateJPY: 0.203, currJPY: 0,
+                    rawUSD: 0, rateUSD: 32.14, currUSD: 0,
+                    rawHKD: 0, rateHKD: 4.1, currHKD: 0,
+                    note: ''
+                });
+
+                const currentAssetData = computed(() => {
+                    if (!assetsRecords.value[currentYM.value]) {
+                        assetsRecords.value[currentYM.value] = emptyAssetTemplate();
+                    } else {
+                        const record = assetsRecords.value[currentYM.value];
+                        const template = emptyAssetTemplate();
+                        for (let key in template) {
+                            if (record[key] === undefined) {
+                                record[key] = template[key];
+                            }
+                        }
+                    }
+                    return assetsRecords.value[currentYM.value];
+                });
+
+                const invEntieUSD_TWD = computed({
+                    get() {
+                        const d = currentAssetData.value;
+                        if (!d) return 0;
+                        d.invEntieUSD = Math.round((Number(d.rawEntieUSD) || 0) * (Number(d.rateEntieUSD) || 0));
+                        return d.invEntieUSD;
+                    },
+                    set(val) { if (currentAssetData.value) currentAssetData.value.invEntieUSD = val; }
+                });
+
+                const currJPY_TWD = computed({
+                    get() {
+                        const d = currentAssetData.value;
+                        if (!d) return 0;
+                        d.currJPY = Math.round((Number(d.rawJPY) || 0) * (Number(d.rateJPY) || 0));
+                        return d.currJPY;
+                    },
+                    set(val) { if (currentAssetData.value) currentAssetData.value.currJPY = val; }
+                });
+
+                const currUSD_TWD = computed({
+                    get() {
+                        const d = currentAssetData.value;
+                        if (!d) return 0;
+                        d.currUSD = Math.round((Number(d.rawUSD) || 0) * (Number(d.rateUSD) || 0));
+                        return d.currUSD;
+                    },
+                    set(val) { if (currentAssetData.value) currentAssetData.value.currHKD = val; }
+                });
+
+                const currHKD_TWD = computed({
+                    get() {
+                        const d = currentAssetData.value;
+                        if (!d) return 0;
+                        d.currHKD = Math.round((Number(d.rawHKD) || 0) * (Number(d.rateHKD) || 0));
+                        return d.currHKD;
+                    },
+                    set(val) { if (currentAssetData.value) currentAssetData.value.currHKD = val; }
+                });
+
+                const liquidAssetsTotal = computed(() => {
+                    const d = currentAssetData.value;
+                    return Number(d.postOffice||0) + Number(d.ctbc||0) + Number(d.sinopac||0) + Number(d.entie||0) + 
+                           Number(d.lineBank||0) + Number(d.cash||0) + Number(d.ccCtbc||0) + Number(d.ccFubon||0) + 
+                           Number(d.ccEsun||0) + Number(d.ccKGI||0) + Number(d.ccDBS||0) + Number(d.payJko||0) + 
+                           Number(d.payLine||0) + Number(d.momo||0) + Number(d.voucherHi||0) + Number(d.pxMart||0) + 
+                           Number(d.edatan||0) + Number(d.hanlai||0) + Number(d.otherHome||0) + Number(d.otherAdvance||0) + 
+                           Number(d.otherCatFund||0);
+                });
+
+                const investmentTotal = computed(() => {
+                    const d = currentAssetData.value;
+                    return Number(d.invEntieTWD||0) + invEntieUSD_TWD.value + Number(d.invAllianz||0) + 
+                           Number(d.insFarglory||0) + Number(d.insGlobal||0) + Number(d.twdSavings||0) + Number(d.etfStock||0);
+                });
+
+                const foreignCashTotal = computed(() => {
+                    return currJPY_TWD.value + currUSD_TWD.value + currHKD_TWD.value;
+                });
+
+                const totalAssets = computed(() => {
+                    return liquidAssetsTotal.value + investmentTotal.value + foreignCashTotal.value;
+                });
+
+                const transactions = ref([])
+
+                const getLivingExpenseTotalForMonth = (year, month) => {
+                    const mStr = String(month).padStart(2, '0');
+                    const prefix = `${year}-${mStr}`;
+                    return transactions.value
+                        .filter(item => item.date && String(item.date).startsWith(prefix) && item.category === '生活開銷')
+                        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+                };
+
+                watch(transactions, () => {
+                    for (const y in allSummaries.value) {
+                        for (let m = 1; m <= 12; m++) {
+                            if (allSummaries.value[y][m]) {
+                                allSummaries.value[y][m].livingExpense = getLivingExpenseTotalForMonth(Number(y), m);
+                            }
+                        }
+                    }
+                }, { deep: true });
+
+                const fetchData = async () => {
+                    isSubmitting.value = true;
+                    try {
+                        const res = await fetch(GAS_URL, { method: 'GET', redirect: 'follow' });
+                        const data = await res.json();
+                        
+                        if (data.transactions) {
+                            transactions.value = data.transactions.map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
+                        }
+                        if (data.summaries) allSummaries.value = data.summaries;
+                        if (data.assetsRecords) assetsRecords.value = data.assetsRecords;
+                        if (data.fundsRecords) fundsRecords.value = data.fundsRecords;
+                        
+                        initYearStructure(selectedYear.value);
+                        initFundsStructure(selectedYear.value);
+                        for (const y in allSummaries.value) {
+                            initYearStructure(y);
+                            for (let m = 1; m <= 12; m++) {
+                                allSummaries.value[y][m].livingExpense = getLivingExpenseTotalForMonth(Number(y), m);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('讀取雲端資料失敗：', err);
+                    } finally {
+                        isSubmitting.value = false;
+                    }
+                }
+
+                onMounted(() => {
+                    initYearStructure(selectedYear.value);
+                    initFundsStructure(selectedYear.value);
+                    fetchData();
+                })
+
+                const changeMonth = (direction) => {
+                    let newMonth = currentMonthNum.value + direction;
+                    if (newMonth > 12) { newMonth = 1; selectedYear.value += 1; }
+                    else if (newMonth < 1) { newMonth = 12; selectedYear.value -= 1; }
+                    currentMonthNum.value = newMonth;
+                    initYearStructure(selectedYear.value);
+                    initFundsStructure(selectedYear.value);
+                }
+
+                const onYearChange = () => { 
+                    initYearStructure(selectedYear.value); 
+                    initFundsStructure(selectedYear.value);
+                }
+
+                const currentYearSummaries = computed(() => {
+                    initYearStructure(selectedYear.value);
+                    return allSummaries.value[selectedYear.value];
+                });
+
+                const currentSummary = computed(() => {
+                    return currentYearSummaries.value[currentMonthNum.value] || {};
+                });
+
+                const filteredTransactions = computed(() => {
+                    const y = selectedYear.value;
+                    const m = String(currentMonthNum.value).padStart(2, '0');
+                    const prefix = `${y}-${m}`;
+                    return transactions.value
+                        .filter(item => item.date && String(item.date).startsWith(prefix))
+                        .sort((a, b) => new Date(b.date) - new Date(a.date));
+                })
+
+                const categoryTotals = computed(() => {
+                    const totals = {};
+                    filteredTransactions.value.forEach(item => {
+                        const cat = item.category || '其它';
+                        totals[cat] = (totals[cat] || 0) + Number(item.amount || 0);
+                    });
+                    return totals;
+                });
+
+                const formatDate = (dateStr) => {
+                    if (!dateStr) return '';
+                    try {
+                        const d = new Date(dateStr);
+                        if (isNaN(d.getTime())) return dateStr;
+                        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                    } catch (e) { return dateStr; }
+                }
+
+                const formatMoney = (val) => { return Number(val || 0).toLocaleString(); }
+
+                const saveAllSummaries = async () => {
+                    isSubmitting.value = true;
+                    try {
+                        await fetch(GAS_URL, {
+                            method: 'POST', mode: 'no-cors',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: "saveSummary", summaries: allSummaries.value })
+                        });
+                        isSubmitting.value = false;
+                        toastMessage.value = `${selectedYear.value} 年摘要儲存成功！`;
+                        showSuccessToast.value = true;
+                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
+                    } catch (err) {
+                        isSubmitting.value = false;
+                        alert('儲存發生錯誤');
+                    }
+                }
+
+                const saveAssetsRecord = async () => {
+                    isSubmitting.value = true;
+                    try {
+                        await fetch(GAS_URL, {
+                            method: 'POST', mode: 'no-cors',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: "saveAssets", assetsRecords: assetsRecords.value })
+                        });
+                        isSubmitting.value = false;
+                        toastMessage.value = `${currentYM.value} 資產紀錄儲存成功！`;
+                        showSuccessToast.value = true;
+                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
+                    } catch (err) {
+                        isSubmitting.value = false;
+                        alert('儲存資產發生錯誤');
+                    }
+                }
+
+                const syncTransactionsToCloud = async () => {
+                    await fetch(GAS_URL, {
+                        method: 'POST', mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: "saveTransactions", transactions: transactions.value })
+                    });
+                }
+
+                const saveTransaction = async () => {
+                    showModal.value = false;
+                    isSubmitting.value = true;
+                    
+                    if (isEditing.value) {
+                        const index = transactions.value.findIndex(t => t.id === editingId.value);
+                        if (index !== -1) {
+                            transactions.value[index] = {
+                                id: editingId.value,
+                                type: 'expense',
+                                date: form.value.date,
+                                title: form.value.title,
+                                amount: Number(form.value.amount),
+                                category: form.value.category
+                            };
+                        }
+                        toastMessage.value = "開銷明細修改成功！";
+                    } else {
+                        const newTx = {
+                            id: Date.now(),
+                            type: 'expense',
+                            date: form.value.date,
+                            title: form.value.title,
+                            amount: Number(form.value.amount),
+                            category: form.value.category
+                        };
+                        transactions.value.unshift(newTx);
+                        toastMessage.value = "開銷明細新增成功！";
+                    }
+
+                    try {
+                        await syncTransactionsToCloud();
+                        await fetchData();
+                        isSubmitting.value = false;
+                        showSuccessToast.value = true;
+                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
+                    } catch (err) {
+                        isSubmitting.value = false;
+                        alert('儲存失敗');
+                    }
+                }
+
+                const deleteTransaction = async (id) => {
+                    if (!confirm('確定要刪除這筆開銷紀錄嗎？')) return;
+                    isSubmitting.value = true;
+                    
+                    transactions.value = transactions.value.filter(t => t.id !== id);
+
+                    try {
+                        await syncTransactionsToCloud();
+                        await fetchData();
+                        isSubmitting.value = false;
+                        toastMessage.value = "開銷明細已刪除！";
+                        showSuccessToast.value = true;
+                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
+                    } catch (err) {
+                        isSubmitting.value = false;
+                        alert('刪除失敗');
+                    }
+                }
+
+                return {
+                    activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
+                    form, commonItems, newCustomItem, addCustomItem, removeCustomItem,
+                    currentYearSummaries, currentSummary, filteredTransactions, categoryTotals,
+                    formatDate, formatMoney, saveAllSummaries, fetchData,
+                    isSubmitting, showSuccessToast, toastMessage, showModal,
+                    currentYM, currentAssetData, liquidAssetsTotal, investmentTotal, foreignCashTotal, totalAssets, saveAssetsRecord,
+                    invEntieUSD_TWD, currJPY_TWD, currUSD_TWD, currHKD_TWD,
+                    isEditing, openAddModal, openEditModal, closeModal, saveTransaction, deleteTransaction,
+                    currentFundsData, saveFundsRecord, updateAllianzInvestment,
+                    getEntieTWDBaseNetProfit, getEntieTWDNetProfit, sumEntieTWDField, sumEntieTWDNetProfit,
+                    getEntieUSDBaseNetProfit, getEntieUSDNetProfit, sumEntieUSDField, sumEntieUSDNetProfit,
+                    getAllianzBaseNetProfit, getAllianzNetProfit, sumAllianzField, sumAllianzNetProfit
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>
