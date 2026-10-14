@@ -32,7 +32,7 @@ test('opaque response alone never reports success; retry retains the same transa
 test('failed initial load blocks writes, and concurrent cloud changes block overwrite',async()=>{
  const api=backend(),f=frontend(api),a=f.app;f.setMode('offline');await a.fetchData();await a.saveFundsRecord();assert.equal(f.posts(),0);
  f.setMode('normal');await a.fetchData();const remote=api.read();api.post({action:'saveFunds',fundsRecords:{2020:{allianz:{baseValue:42}}},expectedRevision:remote.revisions.fundsRecords});
- await a.saveFundsRecord();assert.equal(f.posts(),0);assert.ok(a.syncError.value.includes('其他裝置'));assert.ok(a.pendingSave.value);
+ await a.saveFundsRecord();assert.equal(f.posts(),1);assert.equal(api.read().fundsRecords[2020].allianz.baseValue,42);assert.ok(a.syncError.value.includes('其他裝置'));assert.ok(a.pendingSave.value);
 });
 test('funds use named ordinary cells; empty and zero values round trip',()=>{
  const api=backend();
@@ -62,7 +62,7 @@ test('original asset and summary column order is preserved including zeros, note
  const header=fresh.sheets['資產負債'].rows[0].slice();assert.equal(header.length,42);assert.equal(header[0],'記錄年月');assert.equal(header[41],'備註');
  const next=fresh.read();next.assetsRecords['2026-01'].cash=100;
  assert.equal(fresh.post({action:'saveAssets',assetsRecords:next.assetsRecords,expectedRevision:next.revisions.assetsRecords}).status,'success');
- assert.deepEqual(fresh.sheets['資產負債'].rows[0],header);assert.equal(fresh.read().assetsRecords['2026-01'].rateJPY,0);assert.equal(fresh.read().assetsRecords['2026-01'].note,'測試');
+ assert.deepEqual(Array.from(fresh.sheets['資產負債'].rows[0]),Array.from(header));assert.equal(fresh.read().assetsRecords['2026-01'].rateJPY,0);assert.equal(fresh.read().assetsRecords['2026-01'].note,'測試');
  assert.equal(fresh.post({action:'saveSummary',summaries:{2026:{12:{salary:100,insurance:2,extraIncome:3,livingExpense:4,insuranceExpense:5,otherExpense:6,familyExpense:7,note:'年底'}}},expectedRevision:fresh.read().revisions.summaries}).status,'success');
  assert.deepEqual(Array.from(fresh.sheets['年度摘要'].rows[1]),['2026',12,100,2,3,4,5,6,7,'年底']);
 });
@@ -92,4 +92,33 @@ test('unexpected existing headers refuse replacement without changing worksheet 
  const api=backend(),rows=[['日期','金額','項目','分類','類型'],['2026-10-14',100,'original','其它','expense']];api.seed('明細',rows);
  const data=api.read();const out=api.post({action:'saveTransactions',transactions:[{id:1,date:'2026-10-14',title:'new',amount:10,category:'其它',type:'expense'}],expectedRevision:data.revisions.transactions});
  assert.equal(out.status,'error');assert.equal(JSON.stringify(api.sheets['明細'].rows),JSON.stringify(rows));
+});
+test('normal changed save uses two requests and reads only the selected worksheet',async()=>{
+ const api=backend();
+ api.seed('明細',[['日期','項目','金額','分類','類型']]);
+ api.seed('年度摘要',[['年份','月份','薪資收入','勞健保等','額外收入','生活開銷','保險開銷','其它開銷','家庭開銷','備註']]);
+ api.seed('基金投資明細',[Array.from(api.ctx.FUND_HEADERS)]);
+ const f=frontend(api),a=f.app;await a.fetchData();a.currentAssetData.value.cash=12;
+ const start=f.requests.length;api.resetReads();await a.saveAssetsRecord();
+ assert.equal(a.pendingSave.value,null);assert.deepEqual(f.requests.slice(start),[{method:'POST',dataset:null},{method:'GET',dataset:'assetsRecords'}]);
+ assert.equal(api.reads['明細']||0,0);assert.equal(api.reads['年度摘要']||0,0);assert.equal(api.reads['基金投資明細']||0,0);
+ a.currentAssetData.value.cash=20;await a.saveAssetsRecord();assert.equal(a.pendingSave.value,null);assert.equal(api.read('assetsRecords').assetsRecords[a.currentYM.value].cash,20);
+});
+test('dataset GET returns only requested data and does not read unrelated tables',()=>{
+ const api=backend();api.seed('明細',[['日期','項目','金額','分類','類型'],['2026-10-14','test',10,'其它','expense']]);
+ api.seed('年度摘要',[['年份','月份']]);api.resetReads();
+ const data=api.read('transactions');assert.equal(data.transactions.length,1);assert.equal(data.summaries,undefined);assert.equal(data.fundsRecords,undefined);assert.equal(data.protocolVersion,4);
+ assert.deepEqual(Object.keys(data.revisions),['transactions']);assert.equal(api.reads['明細'],1);assert.equal(api.reads['年度摘要']||0,0);
+ assert.equal(api.read('not-a-dataset').status,'error');
+});
+test('lost confirmation is recovered with one GET and no duplicate POST',async()=>{
+ const api=backend(),f=frontend(api),a=f.app;await a.fetchData();f.setMode('lost-confirmation');
+ a.form.value={date:'2026-10-14',title:'saved once',amount:10,category:'其它'};await a.saveTransaction();
+ assert.ok(a.pendingSave.value);assert.equal(a.showSuccessToast.value,false);assert.equal(api.read().transactions.length,1);
+ f.setMode('normal');const start=f.requests.length,posts=f.posts();await a.retrySave();
+ assert.equal(a.pendingSave.value,null);assert.equal(f.posts(),posts);assert.deepEqual(f.requests.slice(start),[{method:'GET',dataset:'transactions'}]);assert.equal(api.read().transactions.length,1);
+});
+test('optimized frontend remains compatible with the full-read version 3 API',async()=>{
+ const api=backend(),compat={post:api.post,read:()=>{const data=api.read();data.protocolVersion=3;return data}};
+ const f=frontend(compat),a=f.app;await a.fetchData();a.currentAssetData.value.cash=32;await a.saveAssetsRecord();assert.equal(a.pendingSave.value,null);assert.equal(api.read().assetsRecords[a.currentYM.value].cash,32);
 });

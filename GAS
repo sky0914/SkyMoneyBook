@@ -91,13 +91,13 @@ function canonical_(v) {
 function revision_(data) {
   return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, canonical_(data)));
 }
-function date_(v, ss) {
-  if (v instanceof Date) return Utilities.formatDate(v, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+function date_(v, ss, timezone) {
+  if (v instanceof Date) return Utilities.formatDate(v, timezone || ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
   var text = String(v || '').trim(), match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:T.*)?$/);
   return match ? match[1] + '-' + ('0' + match[2]).slice(-2) + '-' + ('0' + match[3]).slice(-2) : text;
 }
-function month_(v, ss) {
-  if (v instanceof Date) return Utilities.formatDate(v, ss.getSpreadsheetTimeZone(), 'yyyy-MM');
+function month_(v, ss, timezone) {
+  if (v instanceof Date) return Utilities.formatDate(v, timezone || ss.getSpreadsheetTimeZone(), 'yyyy-MM');
   var text = String(v || '').trim(), match = text.match(/^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$/);
   return match ? match[1] + '-' + ('0' + match[2]).slice(-2) : text;
 }
@@ -105,13 +105,14 @@ function rows_(ss, name) {
   var sheet = ss.getSheetByName(name);
   return sheet ? sheet.getDataRange().getValues().slice(1) : [];
 }
-function read_(ss) {
+function read_(ss, key) {
+  var timezone = ss.getSpreadsheetTimeZone();
   var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}};
-  rows_(ss, '明細').forEach(function(r, i) {
+  if (!key || key === 'transactions') rows_(ss, '明細').forEach(function(r, i) {
     if (!r[0]) return;
-    result.transactions.push({id: i + 1, date: date_(r[0], ss), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
+    result.transactions.push({id: i + 1, date: date_(r[0], ss, timezone), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
   });
-  rows_(ss, '年度摘要').forEach(function(r) {
+  if (!key || key === 'summaries') rows_(ss, '年度摘要').forEach(function(r) {
     if (!r[0] || !r[1]) return;
     var year = String(r[0]).trim(), month = String(Number(r[1]));
     if (!result.summaries[year]) result.summaries[year] = {};
@@ -119,25 +120,32 @@ function read_(ss) {
     SUMMARY_FIELDS.forEach(function(field, i) { record[field] = field === 'note' ? String(r[i + 1] || '') : Number(r[i + 1] || 0); });
     result.summaries[year][month] = record;
   });
-  rows_(ss, '資產負債').forEach(function(r) {
+  if (!key || key === 'assetsRecords') rows_(ss, '資產負債').forEach(function(r) {
     if (!r[0]) return;
     var record = {};
-    ASSET_FIELDS.forEach(function(field, i) { record[field] = field === 'date' ? date_(r[i + 1], ss) : field === 'note' ? String(r[i + 1] || '') : Number(r[i + 1] || 0); });
-    result.assetsRecords[month_(r[0], ss)] = record;
+    ASSET_FIELDS.forEach(function(field, i) { record[field] = field === 'date' ? date_(r[i + 1], ss, timezone) : field === 'note' ? String(r[i + 1] || '') : Number(r[i + 1] || 0); });
+    result.assetsRecords[month_(r[0], ss, timezone)] = record;
   });
   result.datasetErrors = {};
-  try { result.fundsRecords = readFunds_(ss); }
+  try { if (!key || key === 'fundsRecords') result.fundsRecords = readFunds_(ss); }
   catch (err) { result.datasetErrors.fundsRecords = String(err); }
   result.revisions = {};
-  ['transactions','summaries','assetsRecords','fundsRecords'].forEach(function(key) { result.revisions[key] = revision_(result[key]); });
-  result.protocolVersion = 3;
+  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
+  result.protocolVersion = 4;
+  if (key) {
+    var selected = {revisions: result.revisions, datasetErrors: result.datasetErrors, protocolVersion: result.protocolVersion};
+    selected[key] = result[key];
+    return selected;
+  }
   return result;
 }
-function doGet() {
+function doGet(e) {
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    return json_(read_(SpreadsheetApp.openById(BOOK_ID)));
+    var key = e && e.parameter && e.parameter.dataset;
+    if (key && ['transactions','summaries','assetsRecords','fundsRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
+    return json_(read_(SpreadsheetApp.openById(BOOK_ID), key));
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
 }
@@ -151,7 +159,7 @@ function replaceRows_(ss, name, rows) {
   var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
   var previousRows = sheet.getLastRow();
   if (previousRows) {
-    var header = sheet.getDataRange().getValues()[0].slice(0, rows[0].length);
+    var header = sheet.getRange(1, 1, 1, rows[0].length).getValues()[0];
     if (canonical_(header) !== canonical_(rows[0])) throw new Error('工作表「' + name + '」欄位與原格式不符，已停止寫入');
     rows[0] = header;
   }
@@ -211,12 +219,13 @@ function doPost(e) {
       }
     }
     lock.waitLock(10000);
-    var ss = SpreadsheetApp.openById(BOOK_ID), current = read_(ss);
+    var ss = SpreadsheetApp.openById(BOOK_ID), current = read_(ss, key);
     if (current.datasetErrors[key]) throw new Error(current.datasetErrors[key]);
     if (current.revisions[key] !== payload.expectedRevision) return json_({status: 'conflict', message: 'Cloud data changed; reload before saving'});
     replaceRows_(ss, name, rows);
     SpreadsheetApp.flush();
-    return json_({status: 'success', revision: read_(ss).revisions[key]});
+    // The following targeted GET confirms persisted data; avoid a redundant read here.
+    return json_({status: 'success'});
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
 }

@@ -44,7 +44,7 @@
         <!-- ================= 全螢幕載入轉圈圈遮罩 ================= -->
         <div v-if="isSubmitting" class="fixed inset-0 bg-black/70 z-50 flex flex-col items-center justify-center backdrop-blur-md transition-all">
             <div class="w-14 h-14 border-4 border-accentBlue border-t-transparent rounded-full animate-spin mb-4 shadow-lg shadow-blue-500/20"></div>
-            <p class="text-gray-200 font-medium text-sm tracking-wider">雲端資料同步中...</p>
+            <p class="text-gray-200 font-medium text-sm tracking-wider">{{ syncStatus }}</p>
         </div>
 
         <div v-if="syncError" role="alert" class="mb-4 p-4 rounded-xl border border-rose-500 text-rose-300">
@@ -812,19 +812,22 @@
                     canonical(key === 'transactions' ? b.map(({ id, ...row }) => row) : b);
                 const normalize = value => Array.isArray(value) ? value.map(normalize) :
                     value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])])) : value;
-                const request = async options => {
+                const request = async (options, url = GAS_URL) => {
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), 15000);
-                    try { return await fetch(GAS_URL, { ...options, signal: controller.signal }); }
+                    try { return await fetch(url, { ...options, signal: controller.signal }); }
                     finally { clearTimeout(timer); }
                 };
-                const readCloud = async () => {
-                    const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' });
+                const readCloud = async (key = '') => {
+                    const url = key ? GAS_URL + '?dataset=' + encodeURIComponent(key) : GAS_URL;
+                    const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' }, url);
                     if (!res.ok) throw new Error('雲端讀取失敗（HTTP ' + res.status + '）');
                     const data = await res.json();
-                    if (!data || data.protocolVersion !== 3 || !data.revisions || !Array.isArray(data.transactions) ||
-                        !['summaries', 'assetsRecords', 'fundsRecords'].every(key =>
-                            data[key] && typeof data[key] === 'object' && !Array.isArray(data[key]))) {
+                    const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords'];
+                    if (!data || ![3, 4].includes(data.protocolVersion) || !data.revisions ||
+                        !keys.every(field => typeof data.revisions[field] === 'string' &&
+                            (field === 'transactions' ? Array.isArray(data[field]) :
+                                data[field] && typeof data[field] === 'object' && !Array.isArray(data[field])))) {
                         throw new Error('後端版本或資料格式不符，請部署新版 GAS 後再同步');
                     }
                     return data;
@@ -1131,13 +1134,18 @@
 
                 const transactions = ref([])
 
-                const getLivingExpenseTotalForMonth = (year, month) => {
-                    const mStr = String(month).padStart(2, '0');
-                    const prefix = `${year}-${mStr}`;
-                    return transactions.value
-                        .filter(item => item.date && String(item.date).startsWith(prefix) && item.category === '生活開銷')
-                        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
-                };
+                const livingExpenseByMonth = computed(() => {
+                    const totals = {};
+                    for (const item of transactions.value) {
+                        if (item.date && item.category === '生活開銷') {
+                            const ym = String(item.date).slice(0, 7);
+                            totals[ym] = (totals[ym] || 0) + Number(item.amount || 0);
+                        }
+                    }
+                    return totals;
+                });
+                const getLivingExpenseTotalForMonth = (year, month) =>
+                    livingExpenseByMonth.value[`${year}-${String(month).padStart(2, '0')}`] || 0;
 
                 watch(transactions, () => {
                     for (const y in allSummaries.value) {
@@ -1203,31 +1211,45 @@
                             if (field !== 'date' && field !== 'note') expected[ym][field] = Number(expected[ym][field] || 0);
                         }
                     }
+                    const isRetry = !!pendingSave.value;
                     pendingSave.value = { action, key, value: expected, message };
                     isSubmitting.value = true;
                     syncError.value = '';
                     showSuccessToast.value = false;
                     syncStatus.value = '正在確認並儲存資料';
                     try {
-                        const before = await readCloud();
-                        if (before.datasetErrors?.[key]) throw new Error(before.datasetErrors[key]);
-                        if (!sameDataset(key, before[key], expected)) {
-                            if (!sameDataset(key, before[key], remoteSnapshot[key])) {
+                        if (remoteSnapshot.datasetErrors?.[key]) throw new Error(remoteSnapshot.datasetErrors[key]);
+                        let confirmed = null;
+                        // Retry/no-change checks avoid resending an uncertain write. Normal saves
+                        // rely on the backend's locked revision check and need only POST + GET.
+                        if (isRetry || sameDataset(key, remoteSnapshot[key], expected)) {
+                            const before = await readCloud(key);
+                            if (before.datasetErrors?.[key]) throw new Error(before.datasetErrors[key]);
+                            if (sameDataset(key, before[key], expected)) confirmed = before;
+                            else if (!sameDataset(key, before[key], remoteSnapshot[key])) {
                                 throw new Error('雲端資料已被其他裝置修改，請先保留修改內容再重新載入');
                             }
-                            // Apps Script 的 opaque 回應不代表寫入成功；只重試讀取，不自動重送寫入。
+                            else remoteSnapshot.revisions[key] = before.revisions[key];
+                        }
+                        if (!confirmed) {
+                            syncStatus.value = '正在儲存資料';
                             await request({ method: 'POST', mode: 'no-cors',
                                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                                body: JSON.stringify({ action, [key]: expected, expectedRevision: before.revisions[key] }) });
-                            let confirmed = null;
+                                body: JSON.stringify({ action, [key]: expected, expectedRevision: remoteSnapshot.revisions[key] }) });
+                            syncStatus.value = '正在確認儲存結果';
                             for (let attempt = 0; attempt < 4; attempt++) {
-                                const data = await readCloud();
+                                const data = await readCloud(key);
+                                if (data.datasetErrors?.[key]) throw new Error(data.datasetErrors[key]);
                                 if (sameDataset(key, data[key], expected)) { confirmed = data; break; }
+                                if (!sameDataset(key, data[key], remoteSnapshot[key])) {
+                                    throw new Error('雲端資料已被其他裝置修改，請先保留修改內容再重新載入');
+                                }
                                 if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
                             }
                             if (!confirmed) throw new Error('送出後的雲端資料與修改不一致，尚無法確認儲存成功');
-                            remoteSnapshot[key] = clone(confirmed[key]);
-                        } else { remoteSnapshot[key] = clone(before[key]); }
+                        }
+                        remoteSnapshot[key] = clone(confirmed[key]);
+                        remoteSnapshot.revisions[key] = confirmed.revisions[key];
                         if (key === 'transactions') transactions.value = clone(remoteSnapshot.transactions);
                         pendingSave.value = null;
                         syncStatus.value = '已重新讀取並確認儲存';

@@ -14,7 +14,7 @@ const {backend}=require('./helpers.cjs');
   await page.route('**/*',async route=>{
    const req=route.request(),url=req.url();
    if(url.includes('/macros/s/')) {
-    const data=req.method()==='POST'?api.post(JSON.parse(req.postData())):api.read();
+    const data=req.method()==='POST'?api.post(JSON.parse(req.postData())):api.read(new URL(url).searchParams.get('dataset'));
     return route.fulfill({contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify(data)});
    }
    if(url.includes('unpkg.com'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(process.env.VUE_BROWSER_BUILD,'utf8')});
@@ -26,7 +26,7 @@ const {backend}=require('./helpers.cjs');
   await page.goto('http://skymoneybook.test/');
   await page.waitForFunction(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.syncStatus==='雲端資料讀取完成');
   const state=async(fn)=>page.evaluate(fn);
-  await state(()=>{const s=document.querySelector('#app').__vue_app__._container._vnode.component.setupState;s.form={date:'2026-10-14',title:'瀏覽器測試',amount:100,category:'其它'};return s.saveTransaction()});
+  await state(()=>{const s=document.querySelector('#app').__vue_app__._container._vnode.component.setupState;s.selectedYear=2026;s.currentMonthNum=10;s.form={date:'2026-10-14',title:'瀏覽器測試',amount:100,category:'生活開銷'};return s.saveTransaction()});
   assert.equal(api.read().transactions[0].title,'瀏覽器測試');
   for(const [tab,key,edit,button] of [
    ['年收支摘要總表','summaries',s=>{s.currentYearSummaries[1].salary=123},'儲存'],
@@ -43,8 +43,8 @@ const {backend}=require('./helpers.cjs');
   }
   await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.fetchData());
   assert.equal(errors.length,0,errors.join('\n'));
-  const data=await state(()=>{const s=document.querySelector('#app').__vue_app__._container._vnode.component.setupState;return {salary:s.currentYearSummaries[1].salary,fund:s.currentFundsData.allianz.baseValue,cash:s.currentAssetData.cash}});
-  assert.deepEqual(data,{salary:123,fund:99,cash:50});
+  const data=await state(()=>{const s=document.querySelector('#app').__vue_app__._container._vnode.component.setupState;return {salary:s.currentYearSummaries[1].salary,fund:s.currentFundsData.allianz.baseValue,cash:s.currentAssetData.cash,living:s.currentYearSummaries[10].livingExpense}});
+  assert.deepEqual(data,{salary:123,fund:99,cash:50,living:100});
   console.log('Browser reload preserved all values; no page errors');
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});
