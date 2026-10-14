@@ -807,6 +807,9 @@
                 let toastTimer;
                 const clone = value => JSON.parse(JSON.stringify(value));
                 const canonical = value => JSON.stringify(normalize(value));
+                // 明細維持原本五欄，列號只供目前畫面編輯，不是儲存資料的一部分。
+                const sameDataset = (key, a, b) => canonical(key === 'transactions' ? a.map(({ id, ...row }) => row) : a) ===
+                    canonical(key === 'transactions' ? b.map(({ id, ...row }) => row) : b);
                 const normalize = value => Array.isArray(value) ? value.map(normalize) :
                     value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])])) : value;
                 const request = async options => {
@@ -819,7 +822,7 @@
                     const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' });
                     if (!res.ok) throw new Error('雲端讀取失敗（HTTP ' + res.status + '）');
                     const data = await res.json();
-                    if (!data || data.protocolVersion !== 2 || !data.revisions || !Array.isArray(data.transactions) ||
+                    if (!data || data.protocolVersion !== 3 || !data.revisions || !Array.isArray(data.transactions) ||
                         !['summaries', 'assetsRecords', 'fundsRecords'].every(key =>
                             data[key] && typeof data[key] === 'object' && !Array.isArray(data[key]))) {
                         throw new Error('後端版本或資料格式不符，請部署新版 GAS 後再同步');
@@ -905,30 +908,27 @@
                 // 多年份摘要結構
                 const allSummaries = ref({});
                 const initYearStructure = (year) => {
-                    if (!allSummaries.value[year]) {
-                        allSummaries.value[year] = {};
-                        for (let m = 1; m <= 12; m++) {
-                            allSummaries.value[year][m] = {
-                                salary: 0, insurance: 0, extraIncome: 0, livingExpense: 0,
-                                insuranceExpense: 0, otherExpense: 0, familyExpense: 0, note: ''
-                            };
-                        }
+                    const months = allSummaries.value[year] ||= {};
+                    for (let m = 1; m <= 12; m++) {
+                        const row = months[m] ||= {};
+                        const defaults = { salary: 0, insurance: 0, extraIncome: 0, livingExpense: 0,
+                            insuranceExpense: 0, otherExpense: 0, familyExpense: 0, note: '' };
+                        for (const key in defaults) if (row[key] === undefined || row[key] === null) row[key] = defaults[key];
                     }
                 };
 
-                // 基金投資記錄結構
                 const fundsRecords = ref({});
                 const initFundsStructure = (year) => {
-                    if (!fundsRecords.value[year]) {
-                        fundsRecords.value[year] = {
-                            entieTWD: { baseTotalInv: '', baseValue: '', baseNote: '', months: {} },
-                            entieUSD: { baseTotalInv: '', baseValue: '', baseNote: '', months: {} },
-                            allianz: { baseTotalInv: '', baseValue: '', baseNote: '', months: {} }
-                        };
+                    const data = fundsRecords.value[year] ||= {};
+                    for (const fund of ['entieTWD', 'entieUSD', 'allianz']) {
+                        const record = data[fund] ||= {};
+                        for (const key of ['baseTotalInv', 'baseValue', 'baseNote']) if (record[key] === undefined || record[key] === null) record[key] = '';
+                        record.months ||= {};
                         for (let m = 1; m <= 12; m++) {
-                            fundsRecords.value[year].entieTWD.months[m] = { interest: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
-                            fundsRecords.value[year].entieUSD.months[m] = { interest: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
-                            fundsRecords.value[year].allianz.months[m] = { interestUSD: '', rate: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
+                            const row = record.months[m] ||= {};
+                            const defaults = fund === 'allianz' ? { interestUSD: '', rate: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' } :
+                                { interest: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
+                            for (const key in defaults) if (row[key] === undefined || row[key] === null) row[key] = defaults[key];
                         }
                     }
                 };
@@ -1161,7 +1161,7 @@
                         transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
                         allSummaries.value = clone(data.summaries);
                         assetsRecords.value = clone(data.assetsRecords);
-                        fundsRecords.value = clone(data.fundsRecords);
+                        if (!data.datasetErrors?.fundsRecords) fundsRecords.value = clone(data.fundsRecords);
                         remoteSnapshot = clone(data);
                         pendingSave.value = null;
                         initYearStructure(selectedYear.value);
@@ -1173,6 +1173,9 @@
                             }
                         }
                         syncStatus.value = '雲端資料讀取完成';
+                        if (data.datasetErrors?.fundsRecords) {
+                            syncError.value = '基金資料讀取失敗：' + data.datasetErrors.fundsRecords + '。其他頁面仍可使用；基金儲存已停止。';
+                        }
                     } catch (err) { reportFailure(err); }
                     finally { isSubmitting.value = false; }
                 };
@@ -1207,8 +1210,9 @@
                     syncStatus.value = '正在確認並儲存資料';
                     try {
                         const before = await readCloud();
-                        if (canonical(before[key]) !== canonical(expected)) {
-                            if (canonical(before[key]) !== canonical(remoteSnapshot[key])) {
+                        if (before.datasetErrors?.[key]) throw new Error(before.datasetErrors[key]);
+                        if (!sameDataset(key, before[key], expected)) {
+                            if (!sameDataset(key, before[key], remoteSnapshot[key])) {
                                 throw new Error('雲端資料已被其他裝置修改，請先保留修改內容再重新載入');
                             }
                             // Apps Script 的 opaque 回應不代表寫入成功；只重試讀取，不自動重送寫入。
@@ -1218,12 +1222,13 @@
                             let confirmed = null;
                             for (let attempt = 0; attempt < 4; attempt++) {
                                 const data = await readCloud();
-                                if (canonical(data[key]) === canonical(expected)) { confirmed = data; break; }
+                                if (sameDataset(key, data[key], expected)) { confirmed = data; break; }
                                 if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
                             }
                             if (!confirmed) throw new Error('送出後的雲端資料與修改不一致，尚無法確認儲存成功');
                             remoteSnapshot[key] = clone(confirmed[key]);
                         } else { remoteSnapshot[key] = clone(before[key]); }
+                        if (key === 'transactions') transactions.value = clone(remoteSnapshot.transactions);
                         pendingSave.value = null;
                         syncStatus.value = '已重新讀取並確認儲存';
                         toastMessage.value = message;

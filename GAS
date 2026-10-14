@@ -2,6 +2,84 @@
 var BOOK_ID = "16JQJXIZXfkNsoIHOuuipvJaEah_Bbq2U0UdXo5n2HSA";
 var ASSET_FIELDS = ["date", "postOffice", "ctbc", "sinopac", "entie", "lineBank", "cash", "ccCtbc", "ccFubon", "ccEsun", "ccKGI", "ccDBS", "payJko", "payLine", "momo", "voucherHi", "pxMart", "edatan", "hanlai", "otherHome", "otherAdvance", "otherCatFund", "invEntieTWD", "rawEntieUSD", "rateEntieUSD", "invEntieUSD", "invAllianz", "insFarglory", "insGlobal", "twdSavings", "etfStock", "rawJPY", "rateJPY", "currJPY", "rawUSD", "rateUSD", "currUSD", "rawHKD", "rateHKD", "currHKD", "note"];
 var SUMMARY_FIELDS = ["month", "salary", "insurance", "extraIncome", "livingExpense", "insuranceExpense", "otherExpense", "familyExpense", "note"];
+var FUND_NAMES = {entieTWD: '安泰台幣', entieUSD: '安泰美金', allianz: '安聯'};
+var FUND_HEADERS = ['年份','基金','月份','利息','利息(美金)','交易匯率','投資金額','手續費','累積投資','現值','備註'];
+function emptyFunds_() {
+  var result = {};
+  Object.keys(FUND_NAMES).forEach(function(fund) {
+    var record = {baseTotalInv: '', baseValue: '', baseNote: '', months: {}};
+    for (var month = 1; month <= 12; month++) record.months[month] = fund === 'allianz' ?
+      {interestUSD: '', rate: '', investment: '', fee: '', totalInvestment: '', value: '', note: ''} :
+      {interest: '', investment: '', fee: '', totalInvestment: '', value: '', note: ''};
+    result[fund] = record;
+  });
+  return result;
+}
+function fundNumber_(v) { return v === '' || v === undefined || v === null ? '' : numeric_(v); }
+function readFunds_(ss) {
+  var result = {}, sheet = ss.getSheetByName('基金投資明細');
+  if (sheet) {
+    var values = sheet.getDataRange().getValues();
+    if (sheet.getLastRow() && canonical_(values[0].slice(0, FUND_HEADERS.length)) !== canonical_(FUND_HEADERS)) throw new Error('基金投資明細欄位不符，請保留資料並確認欄位順序');
+    values.slice(1).forEach(function(r) {
+      if (!r[0]) return;
+      var year = String(r[0]), fund = Object.keys(FUND_NAMES).filter(function(key) { return FUND_NAMES[key] === r[1]; })[0], month = Number(r[2]);
+      if (!/^\d{4}$/.test(year) || !fund || !Number.isInteger(month) || month < 0 || month > 12) throw new Error('基金投資明細年份、基金或月份無效');
+      if (!result[year]) result[year] = emptyFunds_();
+      var record = result[year][fund];
+      if (month === 0) {
+        record.baseTotalInv = fundNumber_(r[8]); record.baseValue = fundNumber_(r[9]); record.baseNote = String(r[10] || '');
+      } else {
+        var row = record.months[month];
+        if (fund === 'allianz') { row.interestUSD = fundNumber_(r[4]); row.rate = fundNumber_(r[5]); }
+        else row.interest = fundNumber_(r[3]);
+        row.investment = fundNumber_(r[6]); row.fee = fundNumber_(r[7]);
+        row.totalInvestment = fundNumber_(r[8]); row.value = fundNumber_(r[9]); row.note = String(r[10] || '');
+      }
+    });
+  } else {
+    // Read-only compatibility for the earlier release. New writes always use ordinary cells.
+    var legacy = ss.getSheetByName('基金投資');
+    if (legacy && legacy.getLastRow()) {
+      var values = legacy.getDataRange().getValues();
+      if (values[0][0] !== '年份' || values[0][1] !== 'JSON') throw new Error('既有基金工作表格式未知，已停止讀取以避免遺失資料');
+      values.slice(1).forEach(function(r) {
+        if (!r[0]) return;
+        var year = String(r[0]), data = JSON.parse(r[1]);
+        result[year] = emptyFunds_();
+        Object.keys(FUND_NAMES).forEach(function(fund) {
+          var old = data[fund] || {}, record = result[year][fund];
+          record.baseTotalInv = fundNumber_(old.baseTotalInv); record.baseValue = fundNumber_(old.baseValue); record.baseNote = String(old.baseNote || '');
+          for (var m = 1; m <= 12; m++) {
+            var previous = (old.months || {})[m] || {}, row = record.months[m];
+            Object.keys(row).forEach(function(field) { row[field] = field === 'note' ? String(previous[field] || '') : fundNumber_(previous[field]); });
+          }
+        });
+      });
+    }
+  }
+  return result;
+}
+function fundRows_(data) {
+  var rows = [FUND_HEADERS.slice()];
+  Object.keys(data).sort().forEach(function(year) {
+    if (!/^\d{4}$/.test(year) || !object_(data[year])) throw new Error('Invalid fund year');
+    Object.keys(data[year]).forEach(function(key) { if (!FUND_NAMES[key]) throw new Error('Unknown fund'); });
+    Object.keys(FUND_NAMES).forEach(function(fund) {
+      var record = data[year][fund] || {};
+      if (!object_(record) || (record.months && !object_(record.months))) throw new Error('Invalid fund record');
+      rows.push([year, FUND_NAMES[fund], 0, '', '', '', '', '', fundNumber_(record.baseTotalInv), fundNumber_(record.baseValue), String(record.baseNote || '')]);
+      for (var month = 1; month <= 12; month++) {
+        var row = (record.months || {})[month] || {};
+        if (!object_(row)) throw new Error('Invalid fund month');
+        rows.push([year, FUND_NAMES[fund], month, fund === 'allianz' ? '' : fundNumber_(row.interest),
+          fund === 'allianz' ? fundNumber_(row.interestUSD) : '', fund === 'allianz' ? fundNumber_(row.rate) : '',
+          fundNumber_(row.investment), fundNumber_(row.fee), fundNumber_(row.totalInvestment), fundNumber_(row.value), String(row.note || '')]);
+      }
+    });
+  });
+  return rows;
+}
 function json_(data) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -14,7 +92,14 @@ function revision_(data) {
   return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, canonical_(data)));
 }
 function date_(v, ss) {
-  return v instanceof Date ? Utilities.formatDate(v, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd') : String(v || '');
+  if (v instanceof Date) return Utilities.formatDate(v, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+  var text = String(v || '').trim(), match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:T.*)?$/);
+  return match ? match[1] + '-' + ('0' + match[2]).slice(-2) + '-' + ('0' + match[3]).slice(-2) : text;
+}
+function month_(v, ss) {
+  if (v instanceof Date) return Utilities.formatDate(v, ss.getSpreadsheetTimeZone(), 'yyyy-MM');
+  var text = String(v || '').trim(), match = text.match(/^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$/);
+  return match ? match[1] + '-' + ('0' + match[2]).slice(-2) : text;
 }
 function rows_(ss, name) {
   var sheet = ss.getSheetByName(name);
@@ -24,11 +109,11 @@ function read_(ss) {
   var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}};
   rows_(ss, '明細').forEach(function(r, i) {
     if (!r[0]) return;
-    result.transactions.push({id: r[5] || i + 1, date: date_(r[0], ss), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
+    result.transactions.push({id: i + 1, date: date_(r[0], ss), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
   });
   rows_(ss, '年度摘要').forEach(function(r) {
     if (!r[0] || !r[1]) return;
-    var year = String(r[0]), month = String(r[1]);
+    var year = String(r[0]).trim(), month = String(Number(r[1]));
     if (!result.summaries[year]) result.summaries[year] = {};
     var record = {};
     SUMMARY_FIELDS.forEach(function(field, i) { record[field] = field === 'note' ? String(r[i + 1] || '') : Number(r[i + 1] || 0); });
@@ -38,12 +123,14 @@ function read_(ss) {
     if (!r[0]) return;
     var record = {};
     ASSET_FIELDS.forEach(function(field, i) { record[field] = field === 'date' ? date_(r[i + 1], ss) : field === 'note' ? String(r[i + 1] || '') : Number(r[i + 1] || 0); });
-    result.assetsRecords[String(r[0])] = record;
+    result.assetsRecords[month_(r[0], ss)] = record;
   });
-  rows_(ss, '基金投資').forEach(function(r) { if (r[0]) result.fundsRecords[String(r[0])] = JSON.parse(r[1]); });
+  result.datasetErrors = {};
+  try { result.fundsRecords = readFunds_(ss); }
+  catch (err) { result.datasetErrors.fundsRecords = String(err); }
   result.revisions = {};
   ['transactions','summaries','assetsRecords','fundsRecords'].forEach(function(key) { result.revisions[key] = revision_(result[key]); });
-  result.protocolVersion = 2;
+  result.protocolVersion = 3;
   return result;
 }
 function doGet() {
@@ -63,6 +150,11 @@ function numeric_(v) {
 function replaceRows_(ss, name, rows) {
   var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
   var previousRows = sheet.getLastRow();
+  if (previousRows) {
+    var header = sheet.getDataRange().getValues()[0].slice(0, rows[0].length);
+    if (canonical_(header) !== canonical_(rows[0])) throw new Error('工作表「' + name + '」欄位與原格式不符，已停止寫入');
+    rows[0] = header;
+  }
   if (sheet.getMaxRows() < rows.length) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length - sheet.getMaxRows());
   if (sheet.getMaxColumns() < rows[0].length) sheet.insertColumnsAfter(sheet.getMaxColumns(), rows[0].length - sheet.getMaxColumns());
   // Write one validated batch before removing leftover rows. Keep formatting intact.
@@ -80,11 +172,11 @@ function doPost(e) {
     if (key === 'transactions') {
       if (!Array.isArray(data)) throw new Error('Invalid transactions');
       var ids = {};
-      rows = [['日期','項目','金額','分類','類型','ID']]; name = '明細';
+      rows = [['日期','項目','金額','分類','類型']]; name = '明細';
       data.forEach(function(t) {
         if (!object_(t) || !t.id || ids[t.id] || typeof t.title !== 'string' || !t.title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(t.date) || numeric_(t.amount) <= 0) throw new Error('Invalid transaction');
         ids[t.id] = true;
-        rows.push([t.date,t.title,numeric_(t.amount),String(t.category || ''),String(t.type || 'expense'),t.id]);
+        rows.push([t.date,t.title,numeric_(t.amount),String(t.category || ''),String(t.type || 'expense')]);
       });
     } else {
       if (!object_(data)) throw new Error('Invalid records');
@@ -115,17 +207,12 @@ function doPost(e) {
           rows.push([ym].concat(ASSET_FIELDS.map(function(field) { return field === 'date' || field === 'note' ? String(data[ym][field] || '') : numeric_(data[ym][field]); })));
         });
       } else {
-        name = '基金投資'; rows = [['年份','JSON']];
-        Object.keys(data).sort().forEach(function(year) {
-          if (!/^\d{4}$/.test(year) || !object_(data[year])) throw new Error('Invalid fund year');
-          var json = JSON.stringify(data[year]);
-          if (json.length > 45000) throw new Error('Fund record too large');
-          rows.push([year,json]);
-        });
+        name = '基金投資明細'; rows = fundRows_(data);
       }
     }
     lock.waitLock(10000);
     var ss = SpreadsheetApp.openById(BOOK_ID), current = read_(ss);
+    if (current.datasetErrors[key]) throw new Error(current.datasetErrors[key]);
     if (current.revisions[key] !== payload.expectedRevision) return json_({status: 'conflict', message: 'Cloud data changed; reload before saving'});
     replaceRows_(ss, name, rows);
     SpreadsheetApp.flush();

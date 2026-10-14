@@ -1,35 +1,13 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const vm=require('node:vm');
-const fs=require('node:fs');
-const crypto=require('node:crypto');
-function backend(){
- const sheets={}; let locked=false;
- const ss={getSheetByName:n=>sheets[n],insertSheet:n=>sheets[n]=sheet(),getSpreadsheetTimeZone:()=> 'Asia/Taipei'};
- function sheet(){return {rows:[],getDataRange(){return {getValues:()=>this.rows.length?this.rows:[[null]]}},getLastRow(){return this.rows.length},getMaxRows:()=>1000,getMaxColumns:()=>100,getRange(row,col,n,m){return {setValues:values=>{values.forEach((v,i)=>this.rows[row-1+i]=v.slice())},clearContent:()=>{this.rows.splice(row-1,n)}}}}}
- const ctx=vm.createContext({SpreadsheetApp:{openById:()=>ss,flush(){}},LockService:{getScriptLock:()=>({waitLock(){assert.equal(locked,false);locked=true},hasLock:()=>locked,releaseLock(){locked=false}})},Utilities:{DigestAlgorithm:{SHA_256:'sha256'},computeDigest:(_,s)=>crypto.createHash('sha256').update(s).digest(),base64EncodeWebSafe:b=>b.toString('base64url'),formatDate:d=>d.toISOString().slice(0,10)},ContentService:{MimeType:{JSON:'json'},createTextOutput:s=>({setMimeType:()=>JSON.parse(s)})}});
- vm.runInContext(fs.readFileSync('GAS','utf8'),ctx);
- return {read:()=>ctx.doGet(),post:p=>ctx.doPost({postData:{contents:JSON.stringify(p)}}),sheets};
-}
-function frontend(api){
- let app; let mode='normal'; let posts=0;
- const ref=value=>({value});
- const ctx=vm.createContext({Vue:{ref,computed:f=>({get value(){return typeof f==='function'?f():f.get()}}),watch(){},onMounted(){},createApp:opts=>({mount(){app=opts.setup()}})},localStorage:{getItem:()=>null,setItem(){}},window:{addEventListener(){}},confirm:()=>true,AbortController,console,setTimeout:(fn,ms)=>ms===15000?1:setTimeout(fn,0),clearTimeout(){},fetch:async(_,opts)=>{
- if(mode==='offline') throw new Error('offline');
- if(opts.method==='POST'){posts++; if(mode==='drop')return {type:'opaque'}; api.post(JSON.parse(opts.body));return {type:'opaque'};}
- return {ok:true,json:async()=>api.read()};
- }});
- const html=fs.readFileSync('index_fund_06.html','utf8');
- vm.runInContext([...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1],ctx);
- return {app,setMode:m=>mode=m,posts:()=>posts};
-}
-test('backend round trips all four datasets and keeps transaction IDs',()=>{
+const {backend,frontend}=require('./helpers.cjs');
+test('backend round trips all datasets using original five-column transactions',()=>{
  const api=backend();
  const fixtures={transactions:[{id:777,date:'2026-10-14',title:'test',amount:100,category:'其它',type:'expense'}],summaries:{2026:{1:{month:1,salary:100,note:'test'}}},assetsRecords:{'2026-10':{date:'2026-10-14',cash:50}},fundsRecords:{2026:{allianz:{months:{1:{value:50}}}}}};
  for(const [action,key] of Object.entries({saveTransactions:'transactions',saveSummary:'summaries',saveAssets:'assetsRecords',saveFunds:'fundsRecords'})){
  const out=api.post({action,[key]:fixtures[key],expectedRevision:api.read().revisions[key]});assert.equal(out.status,'success');assert.ok(api.read()[key]);
  }
- assert.equal(api.read().transactions[0].id,777);assert.equal(api.read().fundsRecords[2026].allianz.months[1].value,50);
+ assert.equal(api.read().transactions[0].id,1);assert.equal(api.sheets['明細'].rows[0].length,5);assert.equal(api.read().fundsRecords[2026].allianz.months[1].value,50);
 });
 test('backend rejects stale revisions, invalid amounts and unknown actions without changes',()=>{
  const api=backend();const before=JSON.stringify(api.read());
@@ -53,6 +31,65 @@ test('opaque response alone never reports success; retry retains the same transa
 });
 test('failed initial load blocks writes, and concurrent cloud changes block overwrite',async()=>{
  const api=backend(),f=frontend(api),a=f.app;f.setMode('offline');await a.fetchData();await a.saveFundsRecord();assert.equal(f.posts(),0);
- f.setMode('normal');await a.fetchData();const remote=api.read();api.post({action:'saveFunds',fundsRecords:{2020:{note:'other device'}},expectedRevision:remote.revisions.fundsRecords});
+ f.setMode('normal');await a.fetchData();const remote=api.read();api.post({action:'saveFunds',fundsRecords:{2020:{allianz:{baseValue:42}}},expectedRevision:remote.revisions.fundsRecords});
  await a.saveFundsRecord();assert.equal(f.posts(),0);assert.ok(a.syncError.value.includes('其他裝置'));assert.ok(a.pendingSave.value);
+});
+test('funds use named ordinary cells; empty and zero values round trip',()=>{
+ const api=backend();
+ const funds={2026:{entieTWD:{baseTotalInv:1000,baseValue:0,baseNote:'期初',months:{1:{interest:0,investment:100,fee:'',totalInvestment:1100,value:1150,note:'一月'}}},entieUSD:{months:{2:{interest:2.5,value:200}}},allianz:{months:{3:{interestUSD:3.5,rate:32.1,value:500,note:'安聯'}}}}};
+ assert.equal(api.post({action:'saveFunds',fundsRecords:funds,expectedRevision:api.read().revisions.fundsRecords}).status,'success');
+ const rows=api.sheets['基金投資明細'].rows;
+ assert.equal(rows.length,40);assert.equal(rows[0].includes('JSON'),false);
+ const base=rows.find(r=>r[1]==='安泰台幣'&&r[2]===0),jan=rows.find(r=>r[1]==='安泰台幣'&&r[2]===1),march=rows.find(r=>r[1]==='安聯'&&r[2]===3);
+ assert.equal(base[8],1000);assert.equal(base[9],0);assert.equal(jan[3],0);assert.equal(jan[7],'');assert.equal(march[4],3.5);assert.equal(march[5],32.1);
+ const read=api.read().fundsRecords[2026];assert.equal(read.entieTWD.months[1].fee,'');assert.equal(read.allianz.months[3].note,'安聯');
+});
+test('existing JSON fund data is read only; new saves create ordinary cells without touching it',()=>{
+ const api=backend(),legacy=[['年份','JSON'],[2026,JSON.stringify({allianz:{baseValue:80,months:{1:{value:100}}}})]];
+ api.seed('基金投資',legacy);
+ const before=api.read();assert.equal(before.fundsRecords[2026].allianz.baseValue,80);
+ assert.equal(api.post({action:'saveFunds',fundsRecords:before.fundsRecords,expectedRevision:before.revisions.fundsRecords}).status,'success');
+ assert.equal(JSON.stringify(api.sheets['基金投資'].rows),JSON.stringify(legacy));
+ assert.ok(api.sheets['基金投資明細']);assert.equal(api.read().fundsRecords[2026].allianz.months[1].value,100);
+});
+test('original asset and summary column order is preserved including zeros, notes and Date month cells',()=>{
+ const api=backend();
+ api.seed('資產負債',[['記錄年月','備註日期'],[new Date('2026-01-01T00:00:00Z'),new Date('2026-01-02T00:00:00Z')]]);
+ const read=api.read();assert.equal(read.assetsRecords['2026-01'].date,'2026-01-02');
+ // Full original header obtained from a fresh save, then preserve it on another save.
+ const fresh=backend();const asset={date:'2026-01-02',cash:99,rateJPY:0,note:'測試'};
+ assert.equal(fresh.post({action:'saveAssets',assetsRecords:{'2026-01':asset},expectedRevision:fresh.read().revisions.assetsRecords}).status,'success');
+ const header=fresh.sheets['資產負債'].rows[0].slice();assert.equal(header.length,42);assert.equal(header[0],'記錄年月');assert.equal(header[41],'備註');
+ const next=fresh.read();next.assetsRecords['2026-01'].cash=100;
+ assert.equal(fresh.post({action:'saveAssets',assetsRecords:next.assetsRecords,expectedRevision:next.revisions.assetsRecords}).status,'success');
+ assert.deepEqual(fresh.sheets['資產負債'].rows[0],header);assert.equal(fresh.read().assetsRecords['2026-01'].rateJPY,0);assert.equal(fresh.read().assetsRecords['2026-01'].note,'測試');
+ assert.equal(fresh.post({action:'saveSummary',summaries:{2026:{12:{salary:100,insurance:2,extraIncome:3,livingExpense:4,insuranceExpense:5,otherExpense:6,familyExpense:7,note:'年底'}}},expectedRevision:fresh.read().revisions.summaries}).status,'success');
+ assert.deepEqual(Array.from(fresh.sheets['年度摘要'].rows[1]),['2026',12,100,2,3,4,5,6,7,'年底']);
+});
+test('partial summary and fund records initialize every page without losing existing fields',async()=>{
+ const api=backend();api.seed('年度摘要',[['年份','月份','薪資收入','勞健保等','額外收入','生活開銷','保險開銷','其它開銷','家庭開銷','備註'],[2026,1,10,0,0,0,0,0,0,'保留']]);
+ const f=frontend(api),a=f.app;a.selectedYear.value=2026;await a.fetchData();
+ assert.equal(a.currentYearSummaries.value[1].salary,10);assert.equal(a.currentYearSummaries.value[12].salary,0);
+ assert.equal(a.currentFundsData.value.allianz.months[12].value,'');assert.equal(a.currentFundsData.value.entieUSD.months[1].interest,'');
+ await a.saveAllSummaries();assert.equal(a.pendingSave.value,null);assert.equal(api.read().summaries[2026][1].note,'保留');
+});
+test('editing and deleting synchronize regenerated row IDs without extra sheet columns',async()=>{
+ const api=backend(),f=frontend(api),a=f.app;await a.fetchData();
+ for(const title of ['first','second']){a.isEditing.value=false;a.form.value={date:'2026-10-14',title,amount:10,category:'其它'};await a.saveTransaction();assert.equal(a.pendingSave.value,null)}
+ a.currentMonthNum.value=10;a.selectedYear.value=2026;
+ const tx=a.filteredTransactions.value.find(t=>t.title==='first');a.openEditModal(tx);a.form.value.amount=20;await a.saveTransaction();assert.equal(api.read().transactions.find(t=>t.title==='first').amount,20);
+ await a.deleteTransaction(a.filteredTransactions.value.find(t=>t.title==='second').id);assert.equal(api.read().transactions.length,1);assert.equal(api.read().transactions[0].title,'first');assert.equal(api.sheets['明細'].rows[0].length,5);
+});
+test('unrecognized fund sheet blocks only fund writes and preserves existing sheet data',async()=>{
+ const api=backend(),rows=[['自訂基金欄位'],['keep me']];api.seed('基金投資',rows);
+ const data=api.read();assert.ok(data.datasetErrors.fundsRecords);assert.ok(Array.isArray(data.transactions));
+ assert.equal(api.post({action:'saveFunds',fundsRecords:{},expectedRevision:data.revisions.fundsRecords}).status,'error');
+ assert.equal(JSON.stringify(api.sheets['基金投資'].rows),JSON.stringify(rows));
+ const a=frontend(api).app;await a.fetchData();assert.ok(a.syncError.value.includes('基金'));
+ a.form.value={date:'2026-10-14',title:'其他頁面',amount:10,category:'其它'};await a.saveTransaction();assert.equal(a.pendingSave.value,null);assert.equal(api.read().transactions.length,1);
+});
+test('unexpected existing headers refuse replacement without changing worksheet contents',()=>{
+ const api=backend(),rows=[['日期','金額','項目','分類','類型'],['2026-10-14',100,'original','其它','expense']];api.seed('明細',rows);
+ const data=api.read();const out=api.post({action:'saveTransactions',transactions:[{id:1,date:'2026-10-14',title:'new',amount:10,category:'其它',type:'expense'}],expectedRevision:data.revisions.transactions});
+ assert.equal(out.status,'error');assert.equal(JSON.stringify(api.sheets['明細'].rows),JSON.stringify(rows));
 });
