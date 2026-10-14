@@ -107,7 +107,7 @@ function rows_(ss, name) {
 }
 function read_(ss, key) {
   var timezone = ss.getSpreadsheetTimeZone();
-  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}};
+  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, stockRecords: []};
   if (!key || key === 'transactions') rows_(ss, '明細').forEach(function(r, i) {
     if (!r[0]) return;
     result.transactions.push({id: i + 1, date: date_(r[0], ss, timezone), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
@@ -129,9 +129,11 @@ function read_(ss, key) {
   result.datasetErrors = {};
   try { if (!key || key === 'fundsRecords') result.fundsRecords = readFunds_(ss); }
   catch (err) { result.datasetErrors.fundsRecords = String(err); }
+  try { if (!key || key === 'stockRecords') result.stockRecords = readStockRecords_(ss, timezone); }
+  catch (err) { result.datasetErrors.stockRecords = String(err); }
   result.revisions = {};
-  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
-  result.protocolVersion = 4;
+  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','stockRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
+  result.protocolVersion = 5;
   if (key) {
     var selected = {revisions: result.revisions, datasetErrors: result.datasetErrors, protocolVersion: result.protocolVersion};
     selected[key] = result[key];
@@ -143,9 +145,8 @@ function doGet(e) {
   var lock = LockService.getScriptLock();
   try {
     var key = e && e.parameter && e.parameter.dataset;
-    if (key === 'stockSheet') return json_(readStock_(e.parameter));
     lock.waitLock(10000);
-    if (key && ['transactions','summaries','assetsRecords','fundsRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
+    if (key && ['transactions','summaries','assetsRecords','fundsRecords','stockRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
     return json_(read_(SpreadsheetApp.openById(BOOK_ID), key));
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
@@ -174,15 +175,13 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
     var payload = JSON.parse(e.postData.contents);
-    if (payload.action === 'saveStockCells') {
-      lock.waitLock(10000);
-      return json_(saveStock_(payload));
-    }
-    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords'};
+    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveStocks: 'stockRecords'};
     var key = actions[payload.action];
     if (!key || typeof payload.expectedRevision !== 'string') throw new Error('Unsupported action or missing revision; reload the updated webpage');
     var data = payload[key], rows, name;
-    if (key === 'transactions') {
+    if (key === 'stockRecords') {
+      name = '存股紀錄'; rows = stockRows_(data);
+    } else if (key === 'transactions') {
       if (!Array.isArray(data)) throw new Error('Invalid transactions');
       var ids = {};
       rows = [['日期','項目','金額','分類','類型']]; name = '明細';
@@ -227,7 +226,8 @@ function doPost(e) {
     var ss = SpreadsheetApp.openById(BOOK_ID), current = read_(ss, key);
     if (current.datasetErrors[key]) throw new Error(current.datasetErrors[key]);
     if (current.revisions[key] !== payload.expectedRevision) return json_({status: 'conflict', message: 'Cloud data changed; reload before saving'});
-    replaceRows_(ss, name, rows);
+    if (key === 'stockRecords') writeStockRows_(ss, rows);
+    else replaceRows_(ss, name, rows);
     SpreadsheetApp.flush();
     // The following targeted GET confirms persisted data; avoid a redundant read here.
     return json_({status: 'success'});
@@ -236,149 +236,66 @@ function doPost(e) {
 }
 
 
-// Stock records stay in their original workbook, worksheet and cell positions.
-var STOCK_BOOK_ID = '1E4Xit2DIak_aWRER_6fMbsQK0xU65cr52Rc6uUsvy6Q';
-var STOCK_PAGE_ROWS = 80;
-function stockVisibleSheets_(ss) {
-  return ss.getSheets().filter(function(sheet) { return !sheet.isSheetHidden(); });
+
+// Stock records are ordinary columns in the main bookkeeping workbook.
+var STOCK_HEADERS = ['ID','交易日期','股票代碼','股票名稱','交易類型','股數','單價','成交金額','手續費','交易稅／扣繳','現金股利','收支金額','備註'];
+var STOCK_TYPES = ['買進','賣出','現金股利','配股'];
+function stockMoney_(value) { return Math.sign(value) * Math.round((Math.abs(value) + Number.EPSILON) * 100) / 100; }
+function stockRecord_(raw) {
+  if (!object_(raw) || typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(raw.id) ||
+      typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date) ||
+      typeof raw.code !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,23}$/.test(raw.code) || STOCK_TYPES.indexOf(raw.type) < 0) throw new Error('存股紀錄的 ID、日期、代碼或交易類型無效');
+  var date = Utilities.parseDate(raw.date, 'Etc/UTC', 'yyyy-MM-dd');
+  if (Utilities.formatDate(date, 'Etc/UTC', 'yyyy-MM-dd') !== raw.date) throw new Error('存股交易日期無效');
+  var entry = {id: raw.id, date: raw.date, code: raw.code, name: String(raw.name || ''), type: raw.type,
+    quantity: numeric_(raw.quantity), price: numeric_(raw.price), fee: numeric_(raw.fee), tax: numeric_(raw.tax), dividend: numeric_(raw.dividend), note: String(raw.note || '')};
+  if (entry.name.length > 80 || entry.note.length > 2000 || [entry.quantity,entry.price,entry.fee,entry.tax,entry.dividend].some(function(v) { return v < 0; })) throw new Error('存股數值不得為負數，名稱或備註過長');
+  if (entry.type === '買進' || entry.type === '賣出') {
+    if (entry.quantity <= 0 || entry.price <= 0 || entry.dividend !== 0) throw new Error('買賣需填寫大於零的股數與單價');
+  } else if (entry.type === '現金股利') {
+    if (entry.dividend <= 0 || entry.quantity !== 0 || entry.price !== 0) throw new Error('現金股利金額需大於零');
+  } else if (entry.quantity <= 0 || entry.price !== 0 || entry.dividend !== 0) throw new Error('配股需填寫大於零的股數');
+  entry.gross = stockMoney_(entry.quantity * entry.price);
+  entry.cashFlow = stockMoney_(entry.type === '買進' ? -entry.gross-entry.fee-entry.tax : entry.type === '賣出' ? entry.gross-entry.fee-entry.tax : entry.type === '現金股利' ? entry.dividend-entry.fee-entry.tax : -entry.fee-entry.tax);
+  if (!isFinite(entry.gross) || !isFinite(entry.cashFlow)) throw new Error('存股金額超出可計算範圍');
+  return entry;
 }
-function stockSheet_(ss, id) {
-  var sheets = stockVisibleSheets_(ss);
-  var sheet = id === undefined || id === null || id === '' ? sheets[0] : sheets.filter(function(s) { return s.getSheetId() === Number(id); })[0];
-  if (!sheet) throw new Error('找不到可使用的存股工作表');
-  return sheet;
-}
-function stockKind_(value, format) {
-  var cleaned = String(format || '').replace(/"[^"]*"|\[[^\]]*\]|\\./g, '');
-  if (value instanceof Date || ((value === '' || value === null) && /y|d|m{2,}/i.test(cleaned))) return 'date';
-  if (typeof value === 'boolean') return 'boolean';
-  if (typeof value === 'number' || /[0#?]/.test(cleaned)) return cleaned.indexOf('%') >= 0 ? 'percent' : 'number';
-  return 'text';
-}
-function stockRaw_(value, timezone) {
-  return value instanceof Date ? {dateTime: value.toISOString()} : value;
-}
-function stockCell_(row, column, raw, text, formula, format, timezone) {
-  var kind = stockKind_(raw, format), input = raw;
-  if (raw instanceof Date) input = Utilities.formatDate(raw, timezone, 'yyyy-MM-dd');
-  else if (kind === 'percent' && typeof raw === 'number') input = Number((raw * 100).toPrecision(15));
-  return {row: row, column: column, key: row + ':' + column, text: String(text || ''),
-    kind: kind, storageType: raw instanceof Date ? 'date' : typeof raw, input: input === null ? '' : String(input), formula: !!formula,
-    revision: revision_({value: stockRaw_(raw, timezone), formula: formula || '', format: format || ''})};
-}
-function readStock_(parameters) {
-  var ss = SpreadsheetApp.openById(STOCK_BOOK_ID), sheet = stockSheet_(ss, parameters.sheetId);
-  var contentRows = sheet.getLastRow(), contentColumns = sheet.getLastColumn();
-  var minEndRow = Number(parameters.minEndRow || 0), minColumn = Number(parameters.minColumn || 0);
-  if (!Number.isInteger(minEndRow) || minEndRow < 0 || minEndRow > sheet.getMaxRows() || !Number.isInteger(minColumn) || minColumn < 0 || minColumn > sheet.getMaxColumns()) throw new Error('無效的存股確認範圍');
-  var totalRows = Math.max(contentRows, minEndRow), columns = Math.max(1, contentColumns, minColumn);
-  if (columns > 200) throw new Error('存股工作表超過 200 欄，請先確認需要顯示的範圍');
-  var start = Number(parameters.startRow || 1);
-  if (!Number.isInteger(start) || start < 1) throw new Error('無效的存股讀取範圍');
-  start = Math.min(start, Math.max(1, totalRows));
-  var count = Math.min(STOCK_PAGE_ROWS, Math.max(1, totalRows - start + 1));
-  var range = sheet.getRange(start, 1, count, columns), timezone = ss.getSpreadsheetTimeZone();
-  var mergedRanges = range.getMergedRanges();
-  mergedRanges.forEach(function(merge) {
-    columns = Math.max(columns, merge.getColumn() + merge.getNumColumns() - 1);
-    totalRows = Math.max(totalRows, merge.getRow() + merge.getNumRows() - 1);
+function readStockRecords_(ss, timezone) {
+  var sheet = ss.getSheetByName('存股紀錄');
+  if (!sheet || !sheet.getLastRow()) return [];
+  var values = sheet.getDataRange().getValues();
+  if (canonical_(values[0].slice(0, STOCK_HEADERS.length)) !== canonical_(STOCK_HEADERS)) throw new Error('存股紀錄欄位與新版規格不符，已停止讀寫，請保留原資料');
+  var ids = {};
+  return values.slice(1).filter(function(row) { return row.some(function(v) { return v !== ''; }); }).map(function(r) {
+    var entry = stockRecord_({id: String(r[0] || ''), date: date_(r[1], ss, timezone), code: String(r[2] || ''), name: r[3], type: r[4], quantity:r[5], price:r[6], fee:r[8], tax:r[9], dividend:r[10], note:r[12]});
+    if (ids[entry.id]) throw new Error('存股紀錄 ID 重複'); ids[entry.id] = true;
+    entry.gross = numeric_(r[7]); entry.cashFlow = numeric_(r[11]);
+    return entry;
   });
-  if (columns > 200) throw new Error('存股合併範圍超過 200 欄');
-  count = Math.min(STOCK_PAGE_ROWS, Math.max(1, totalRows - start + 1));
-  range = sheet.getRange(start, 1, count, columns);
-  var raw = range.getValues(), display = range.getDisplayValues(), formulas = range.getFormulas(), formats = range.getNumberFormats();
-  var backgrounds = range.getBackgrounds(), colors = range.getFontColors(), weights = range.getFontWeights();
-  var fonts = range.getFontFamilies(), sizes = range.getFontSizes(), italics = range.getFontStyles();
-  var alignments = range.getHorizontalAlignments(), verticals = range.getVerticalAlignments(), wraps = range.getWraps();
-  var frozen = sheet.getFrozenRows(), headerRow = Math.max(1, frozen);
-  var headers = sheet.getRange(headerRow, 1, 1, columns).getDisplayValues()[0];
-  var merges = mergedRanges.map(function(merge) {
-    var first = Math.max(start, merge.getRow()), last = Math.min(start + count - 1, merge.getRow() + merge.getNumRows() - 1);
-    return {row: first, column: merge.getColumn(), rows: last - first + 1, columns: merge.getNumColumns(),
-      text: merge.getCell(1, 1).getDisplayValue()};
-  });
-  var rows = [], widths = [];
-  for (var c = 1; c <= columns; c++) widths.push(sheet.getColumnWidth(c));
-  for (var r = 0; r < count; r++) {
-    var cells = [];
-    for (var c = 0; c < columns; c++) {
-      var actualRow = start + r, actualColumn = c + 1;
-      var merge = merges.filter(function(m) { return actualRow >= m.row && actualRow < m.row + m.rows && actualColumn >= m.column && actualColumn < m.column + m.columns; })[0];
-      if (merge && (actualRow !== merge.row || actualColumn !== merge.column)) continue;
-      var cell = stockCell_(actualRow, actualColumn, raw[r][c], display[r][c], formulas[r][c], formats[r][c], timezone);
-      cell.rowspan = merge ? merge.rows : 1; cell.colspan = merge ? merge.columns : 1;
-      if (merge) cell.text = merge.text;
-      cell.editable = actualRow > headerRow && actualRow <= contentRows && actualColumn <= contentColumns && !cell.formula && !merge;
-      cell.style = {backgroundColor: backgrounds[r][c], color: colors[r][c], fontWeight: weights[r][c],
-        fontStyle: italics[r][c], fontSize: sizes[r][c] + 'px', fontFamily: fonts[r][c] + ', sans-serif',
-        textAlign: ['left','center','right'].indexOf(alignments[r][c]) >= 0 ? alignments[r][c] : typeof raw[r][c] === 'number' ? 'right' : 'left',
-        verticalAlign: verticals[r][c] || 'middle', whiteSpace: wraps[r][c] ? 'pre-wrap' : 'pre'};
-      cells.push(cell);
-    }
-    rows.push({number: start + r, height: sheet.getRowHeight(start + r), cells: cells});
-  }
-  return {protocolVersion: 4, stockWorkbook: {name: ss.getName(), sheets: stockVisibleSheets_(ss).map(function(s) { return {id: s.getSheetId(), name: s.getName()}; })},
-    stockSheet: {id: sheet.getSheetId(), name: sheet.getName(), startRow: start, endRow: start + count - 1,
-      totalRows: totalRows, pageRows: STOCK_PAGE_ROWS, columnWidths: widths, headers: headers, rows: rows}};
 }
-function stockNewValue_(cell, value, timezone, previous) {
-  if (typeof value !== 'string') throw new Error('無效的存股儲存值');
-  if (value === '') return '';
-  if (cell.kind === 'date') {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('日期請使用 YYYY-MM-DD');
-    var date = previous instanceof Date ? Utilities.parseDate(value + ' ' + Utilities.formatDate(previous, timezone, 'HH:mm:ss.SSS'), timezone, 'yyyy-MM-dd HH:mm:ss.SSS') : Utilities.parseDate(value, timezone, 'yyyy-MM-dd');
-    if (Utilities.formatDate(date, timezone, 'yyyy-MM-dd') !== value) throw new Error('無效的日期');
-    return date;
-  }
-  if (cell.kind === 'number' || cell.kind === 'percent') {
-    if (!value.trim() || !isFinite(Number(value))) throw new Error('請輸入有效的數字');
-    return Number(value) / (cell.kind === 'percent' ? 100 : 1);
-  }
-  if (cell.kind === 'boolean') {
-    if (value !== 'true' && value !== 'false') throw new Error('無效的布林值');
-    return value === 'true';
-  }
-  // Preserve text literally; an entered '=' must not become a spreadsheet formula.
-  return value.charAt(0) === '=' || value.charAt(0) === "'" ? "'" + value : value;
+function stockRows_(data) {
+  if (!Array.isArray(data)) throw new Error('Invalid stock records');
+  var ids = {}, rows = [STOCK_HEADERS.slice()];
+  data.forEach(function(raw, index) {
+    var entry = stockRecord_(raw), row = index + 2;
+    if (ids[entry.id]) throw new Error('存股紀錄 ID 重複'); ids[entry.id] = true;
+    var literal = function(text) { return text.charAt(0) === '=' || text.charAt(0) === "'" ? "'" + text : text; };
+    rows.push([entry.id,entry.date,entry.code,literal(entry.name),entry.type,entry.quantity,entry.price,
+      '=ROUND(F'+row+'*G'+row+',2)',entry.fee,entry.tax,entry.dividend,
+      '=ROUND(IF(E'+row+'="買進",-(H'+row+'+I'+row+'+J'+row+'),IF(E'+row+'="賣出",H'+row+'-I'+row+'-J'+row+',IF(E'+row+'="現金股利",K'+row+'-I'+row+'-J'+row+',-I'+row+'-J'+row+'))),2)',literal(entry.note)]);
+  });
+  return rows;
 }
-function saveStock_(payload) {
-  if (!Number.isInteger(payload.sheetId) || !Array.isArray(payload.changes) || !payload.changes.length || payload.changes.length > 1000) throw new Error('無效的存股儲存要求');
-  var ss = SpreadsheetApp.openById(STOCK_BOOK_ID), sheet = stockSheet_(ss, payload.sheetId), timezone = ss.getSpreadsheetTimeZone();
-  var headerRow = Math.max(1, sheet.getFrozenRows()), maximumRow = sheet.getLastRow(), maximumColumn = sheet.getLastColumn();
-  var seen = {}, firstRow = Infinity, lastRow = 0, firstColumn = Infinity, lastColumn = 0;
-  payload.changes.forEach(function(change) {
-    var key = change.row + ':' + change.column;
-    if (!Number.isInteger(change.row) || !Number.isInteger(change.column) || change.row <= headerRow || change.row > maximumRow || change.column < 1 || change.column > maximumColumn || typeof change.expectedRevision !== 'string' || typeof change.value !== 'string' || seen[key]) throw new Error('存股儲存位置或欄位無效');
-    seen[key] = true; firstRow = Math.min(firstRow, change.row); lastRow = Math.max(lastRow, change.row);
-    firstColumn = Math.min(firstColumn, change.column); lastColumn = Math.max(lastColumn, change.column);
-  });
-  if ((lastRow - firstRow + 1) * (lastColumn - firstColumn + 1) > 30000) throw new Error('請分批儲存存股資料');
-  var range = sheet.getRange(firstRow, firstColumn, lastRow - firstRow + 1, lastColumn - firstColumn + 1);
-  var raw = range.getValues(), formulas = range.getFormulas(), formats = range.getNumberFormats(), merges = range.getMergedRanges();
-  var updates = [];
-  payload.changes.forEach(function(change) {
-    if (merges.some(function(m) { return change.row >= m.getRow() && change.row < m.getRow() + m.getNumRows() && change.column >= m.getColumn() && change.column < m.getColumn() + m.getNumColumns(); })) throw new Error('合併儲存格不直接編輯');
-    var r = change.row - firstRow, c = change.column - firstColumn;
-    var cell = stockCell_(change.row, change.column, raw[r][c], '', formulas[r][c], formats[r][c], timezone);
-    if (cell.formula) throw new Error('公式欄位由試算表自動計算，不能直接覆寫');
-    if (change.kind && change.kind !== cell.kind && !(change.value === '' && raw[r][c] === '')) throw new Error('原儲存格型態已變更，請重新載入');
-    var value = stockNewValue_(cell, change.value, timezone, raw[r][c]);
-    var literalValue = cell.kind === 'text' && (change.value.charAt(0) === '=' || change.value.charAt(0) === "'") ? change.value : value;
-    if (cell.revision !== change.expectedRevision) {
-      if (canonical_(stockRaw_(raw[r][c], timezone)) === canonical_(stockRaw_(literalValue, timezone))) return;
-      throw new Error('存股資料已在試算表中修改，請先保留網頁修改，再重新載入');
-    }
-    updates.push({row: change.row, column: change.column, value: value});
-  });
-  // Validate the entire patch before writing. Never clear/rewrite a sheet or a formula.
-  updates.sort(function(a,b) { return a.row - b.row || a.column - b.column; });
-  var groups = [];
-  updates.forEach(function(update) {
-    var group = groups[groups.length - 1];
-    if (group && group.row === update.row && group.column + group.values.length === update.column) group.values.push(update.value);
-    else groups.push({row: update.row, column: update.column, values: [update.value]});
-  });
-  groups.forEach(function(group) { sheet.getRange(group.row, group.column, 1, group.values.length).setValues([group.values]); });
-  SpreadsheetApp.flush();
-  return {status: 'success'};
+function writeStockRows_(ss, rows) {
+  var sheet = ss.getSheetByName('存股紀錄') || ss.insertSheet('存股紀錄');
+  if (sheet.getMaxRows() < Math.max(2, rows.length)) sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(2, rows.length)-sheet.getMaxRows());
+  if (sheet.getMaxColumns() < STOCK_HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), STOCK_HEADERS.length-sheet.getMaxColumns());
+  var count = Math.max(1, rows.length-1), timezone = ss.getSpreadsheetTimeZone();
+  [1,3,4,13].forEach(function(col) { sheet.getRange(2,col,count,1).setNumberFormat('@'); });
+  sheet.getRange(2,2,count,1).setNumberFormat('yyyy-mm-dd');
+  sheet.getRange(2,6,count,1).setNumberFormat('0.######');
+  sheet.getRange(2,7,count,1).setNumberFormat('0.####');
+  sheet.getRange(2,8,count,5).setNumberFormat('#,##0.00');
+  rows.slice(1).forEach(function(row) { row[1] = Utilities.parseDate(row[1], timezone, 'yyyy-MM-dd'); });
+  replaceRows_(ss,'存股紀錄',rows);
 }
