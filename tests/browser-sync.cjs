@@ -10,7 +10,7 @@ const {backend}=require('./helpers.cjs');
   const page=await browser.newPage();const errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   page.on('dialog',dialog=>dialog.accept());
-  const html=fs.readFileSync('index_fund_06.html','utf8');
+  const html=fs.readFileSync('index.html','utf8');
   await page.route('**/*',async route=>{
    const req=route.request(),url=req.url();
    if(url.includes('/macros/s/')) {

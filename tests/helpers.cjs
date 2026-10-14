@@ -19,7 +19,7 @@ function frontend(api){
  if(opts.method==='POST'){posts++; if(mode==='drop')return {type:'opaque'}; api.post(JSON.parse(opts.body));return {type:'opaque'};}
  return {ok:true,json:async()=>api.read(new URL(url).searchParams.get('dataset'))};
  }});
- const html=fs.readFileSync('index_fund_06.html','utf8');
+ const html=fs.readFileSync('index.html','utf8');
  vm.runInContext([...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1],ctx);
  return {app,setMode:m=>mode=m,posts:()=>posts,requests};
 }
