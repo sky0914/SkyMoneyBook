@@ -47,6 +47,12 @@
             <p class="text-gray-200 font-medium text-sm tracking-wider">雲端資料同步中...</p>
         </div>
 
+        <div v-if="syncError" role="alert" class="mb-4 p-4 rounded-xl border border-rose-500 text-rose-300">
+            {{ syncError }}
+            <button v-if="pendingSave" @click="retrySave" :disabled="isSubmitting" class="ml-3 underline">重試儲存</button>
+            <button @click="fetchData" :disabled="isSubmitting" class="ml-3 underline">重新載入雲端資料</button>
+        </div>
+
         <!-- ================= 成功寫入的彈出通知 (Toast) ================= -->
         <div v-if="showSuccessToast" class="fixed top-6 right-6 bg-emerald-500/95 text-white px-5 py-3 rounded-2xl shadow-2xl z-50 flex items-center gap-3 backdrop-blur-md border border-emerald-400/30 transition-all duration-300 animate-bounce">
             <i class="fa-solid fa-circle-check text-lg"></i>
@@ -134,8 +140,8 @@
                     <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-white">個人日常收支與全年摘要管理</h1>
                 </div>
                 <p class="text-xs text-gray-400 mt-2 flex items-center gap-1.5">
-                    <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    資料已與 Google 試算表雲端同步 (ID: 16JQJXIZXfkNsoIHOuuipvJaEah_Bbq2U0UdXo5n2HSA)
+                    <span class="inline-block w-2 h-2 rounded-full" :class="syncError ? 'bg-rose-500' : isSubmitting ? 'bg-blue-500 animate-pulse' : 'bg-gray-400'"></span>
+                    {{ syncStatus }}
                 </p>
             </div>
             <!-- 年份與月份切換器 -->
@@ -794,6 +800,36 @@
                 });
 
                 const isSubmitting = ref(false)
+                const syncStatus = ref('尚未完成雲端同步');
+                const syncError = ref('');
+                const pendingSave = ref(null);
+                let remoteSnapshot = null;
+                let toastTimer;
+                const clone = value => JSON.parse(JSON.stringify(value));
+                const canonical = value => JSON.stringify(normalize(value));
+                const normalize = value => Array.isArray(value) ? value.map(normalize) :
+                    value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])])) : value;
+                const request = async options => {
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), 15000);
+                    try { return await fetch(GAS_URL, { ...options, signal: controller.signal }); }
+                    finally { clearTimeout(timer); }
+                };
+                const readCloud = async () => {
+                    const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' });
+                    if (!res.ok) throw new Error('雲端讀取失敗（HTTP ' + res.status + '）');
+                    const data = await res.json();
+                    if (!data || data.protocolVersion !== 2 || !data.revisions || !Array.isArray(data.transactions) ||
+                        !['summaries', 'assetsRecords', 'fundsRecords'].every(key =>
+                            data[key] && typeof data[key] === 'object' && !Array.isArray(data[key]))) {
+                        throw new Error('後端版本或資料格式不符，請部署新版 GAS 後再同步');
+                    }
+                    return data;
+                };
+                const reportFailure = err => {
+                    syncStatus.value = '同步未完成';
+                    syncError.value = (err.name === 'AbortError' ? '連線逾時，無法確認儲存結果' : err.message || '網路連線失敗') + '。目前頁面的修改仍保留，請勿關閉或重新整理瀏覽器。';
+                };
                 const showSuccessToast = ref(false)
                 const showModal = ref(false)
                 const toastMessage = ref('寫入成功！')
@@ -990,23 +1026,7 @@
                     return currentNet - baseNet;
                 };
 
-                const saveFundsRecord = async () => {
-                    isSubmitting.value = true;
-                    try {
-                        await fetch(GAS_URL, {
-                            method: 'POST', mode: 'no-cors',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: "saveFunds", fundsRecords: fundsRecords.value })
-                        });
-                        isSubmitting.value = false;
-                        toastMessage.value = `${selectedYear.value} 年基金投資記錄儲存成功！`;
-                        showSuccessToast.value = true;
-                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
-                    } catch (err) {
-                        isSubmitting.value = false;
-                        alert('儲存基金記錄發生錯誤');
-                    }
-                };
+                const saveFundsRecord = () => saveCloud('saveFunds', 'fundsRecords', fundsRecords.value, `${selectedYear.value} 年基金投資記錄已確認儲存`);
 
                 // 資產負債紀錄結構
                 const assetsRecords = ref({});
@@ -1130,18 +1150,20 @@
                 }, { deep: true });
 
                 const fetchData = async () => {
+                    if (isSubmitting.value) return;
+                    if (remoteSnapshot && !confirm('重新載入將以雲端資料取代目前頁面的內容，尚未儲存的修改會遺失。確定繼續？')) return;
                     isSubmitting.value = true;
+                    syncError.value = '';
+                    showSuccessToast.value = false;
+                    syncStatus.value = '正在讀取雲端資料';
                     try {
-                        const res = await fetch(GAS_URL, { method: 'GET', redirect: 'follow' });
-                        const data = await res.json();
-                        
-                        if (data.transactions) {
-                            transactions.value = data.transactions.map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
-                        }
-                        if (data.summaries) allSummaries.value = data.summaries;
-                        if (data.assetsRecords) assetsRecords.value = data.assetsRecords;
-                        if (data.fundsRecords) fundsRecords.value = data.fundsRecords;
-                        
+                        const data = await readCloud();
+                        transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
+                        allSummaries.value = clone(data.summaries);
+                        assetsRecords.value = clone(data.assetsRecords);
+                        fundsRecords.value = clone(data.fundsRecords);
+                        remoteSnapshot = clone(data);
+                        pendingSave.value = null;
                         initYearStructure(selectedYear.value);
                         initFundsStructure(selectedYear.value);
                         for (const y in allSummaries.value) {
@@ -1150,12 +1172,78 @@
                                 allSummaries.value[y][m].livingExpense = getLivingExpenseTotalForMonth(Number(y), m);
                             }
                         }
-                    } catch (err) {
-                        console.error('讀取雲端資料失敗：', err);
-                    } finally {
-                        isSubmitting.value = false;
+                        syncStatus.value = '雲端資料讀取完成';
+                    } catch (err) { reportFailure(err); }
+                    finally { isSubmitting.value = false; }
+                };
+
+                const saveCloud = async (action, key, value, message) => {
+                    if (isSubmitting.value) return false;
+                    if (pendingSave.value && pendingSave.value.key !== key) {
+                        syncError.value = '請先重試尚未確認的儲存，或重新載入雲端資料。';
+                        return false;
                     }
-                }
+                    if (!remoteSnapshot) {
+                        syncError.value = '尚未成功載入雲端資料，請先重新載入，避免覆蓋既有紀錄。';
+                        return false;
+                    }
+                    const expected = clone(value);
+                    if (key === 'summaries') {
+                        for (const year in expected) for (const month in expected[year]) {
+                            const row = expected[year][month];
+                            row.month = Number(month);
+                            for (const field of ['salary', 'insurance', 'extraIncome', 'livingExpense', 'insuranceExpense', 'otherExpense', 'familyExpense']) row[field] = Number(row[field] || 0);
+                        }
+                    }
+                    if (key === 'assetsRecords') {
+                        for (const ym in expected) for (const field in expected[ym]) {
+                            if (field !== 'date' && field !== 'note') expected[ym][field] = Number(expected[ym][field] || 0);
+                        }
+                    }
+                    pendingSave.value = { action, key, value: expected, message };
+                    isSubmitting.value = true;
+                    syncError.value = '';
+                    showSuccessToast.value = false;
+                    syncStatus.value = '正在確認並儲存資料';
+                    try {
+                        const before = await readCloud();
+                        if (canonical(before[key]) !== canonical(expected)) {
+                            if (canonical(before[key]) !== canonical(remoteSnapshot[key])) {
+                                throw new Error('雲端資料已被其他裝置修改，請先保留修改內容再重新載入');
+                            }
+                            // Apps Script 的 opaque 回應不代表寫入成功；只重試讀取，不自動重送寫入。
+                            await request({ method: 'POST', mode: 'no-cors',
+                                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                body: JSON.stringify({ action, [key]: expected, expectedRevision: before.revisions[key] }) });
+                            let confirmed = null;
+                            for (let attempt = 0; attempt < 4; attempt++) {
+                                const data = await readCloud();
+                                if (canonical(data[key]) === canonical(expected)) { confirmed = data; break; }
+                                if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+                            }
+                            if (!confirmed) throw new Error('送出後的雲端資料與修改不一致，尚無法確認儲存成功');
+                            remoteSnapshot[key] = clone(confirmed[key]);
+                        } else { remoteSnapshot[key] = clone(before[key]); }
+                        pendingSave.value = null;
+                        syncStatus.value = '已重新讀取並確認儲存';
+                        toastMessage.value = message;
+                        showSuccessToast.value = true;
+                        clearTimeout(toastTimer);
+                        toastTimer = setTimeout(() => { showSuccessToast.value = false; }, 3000);
+                        return true;
+                    } catch (err) { reportFailure(err); return false; }
+                    finally { isSubmitting.value = false; }
+                };
+                const retrySave = () => {
+                    const pending = pendingSave.value;
+                    if (pending) {
+                        const current = { transactions: transactions.value, summaries: allSummaries.value, assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value };
+                        return saveCloud(pending.action, pending.key, current[pending.key], pending.message);
+                    }
+                };
+                window.addEventListener('beforeunload', event => {
+                    if (pendingSave.value || isSubmitting.value) { event.preventDefault(); event.returnValue = ''; }
+                });
 
                 onMounted(() => {
                     initYearStructure(selectedYear.value);
@@ -1215,54 +1303,21 @@
 
                 const formatMoney = (val) => { return Number(val || 0).toLocaleString(); }
 
-                const saveAllSummaries = async () => {
-                    isSubmitting.value = true;
-                    try {
-                        await fetch(GAS_URL, {
-                            method: 'POST', mode: 'no-cors',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: "saveSummary", summaries: allSummaries.value })
-                        });
-                        isSubmitting.value = false;
-                        toastMessage.value = `${selectedYear.value} 年摘要儲存成功！`;
-                        showSuccessToast.value = true;
-                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
-                    } catch (err) {
-                        isSubmitting.value = false;
-                        alert('儲存發生錯誤');
-                    }
-                }
-
-                const saveAssetsRecord = async () => {
-                    isSubmitting.value = true;
-                    try {
-                        await fetch(GAS_URL, {
-                            method: 'POST', mode: 'no-cors',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: "saveAssets", assetsRecords: assetsRecords.value })
-                        });
-                        isSubmitting.value = false;
-                        toastMessage.value = `${currentYM.value} 資產紀錄儲存成功！`;
-                        showSuccessToast.value = true;
-                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
-                    } catch (err) {
-                        isSubmitting.value = false;
-                        alert('儲存資產發生錯誤');
-                    }
-                }
-
-                const syncTransactionsToCloud = async () => {
-                    await fetch(GAS_URL, {
-                        method: 'POST', mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: "saveTransactions", transactions: transactions.value })
-                    });
-                }
+                const saveAllSummaries = () => saveCloud('saveSummary', 'summaries', allSummaries.value, `${selectedYear.value} 年摘要已確認儲存`);
+                const saveAssetsRecord = () => saveCloud('saveAssets', 'assetsRecords', assetsRecords.value, `${currentYM.value} 資產紀錄已確認儲存`);
+                const syncTransactionsToCloud = () => saveCloud('saveTransactions', 'transactions', transactions.value, '開銷明細已確認儲存');
 
                 const saveTransaction = async () => {
+                    if (isSubmitting.value) return;
+                    if (!remoteSnapshot || pendingSave.value) {
+                        syncError.value = '請先完成雲端載入或處理尚未確認的儲存，再新增或編輯。';
+                        return;
+                    }
+                    if (!form.value.title.trim() || !form.value.date || !Number.isFinite(Number(form.value.amount)) || Number(form.value.amount) <= 0) {
+                        syncError.value = '請填寫日期、項目名稱與大於零的有效金額。';
+                        return;
+                    }
                     showModal.value = false;
-                    isSubmitting.value = true;
-                    
                     if (isEditing.value) {
                         const index = transactions.value.findIndex(t => t.id === editingId.value);
                         if (index !== -1) {
@@ -1289,43 +1344,26 @@
                         toastMessage.value = "開銷明細新增成功！";
                     }
 
-                    try {
-                        await syncTransactionsToCloud();
-                        await fetchData();
-                        isSubmitting.value = false;
-                        showSuccessToast.value = true;
-                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
-                    } catch (err) {
-                        isSubmitting.value = false;
-                        alert('儲存失敗');
-                    }
-                }
+                    await syncTransactionsToCloud();
+                };
 
                 const deleteTransaction = async (id) => {
-                    if (!confirm('確定要刪除這筆開銷紀錄嗎？')) return;
-                    isSubmitting.value = true;
-                    
-                    transactions.value = transactions.value.filter(t => t.id !== id);
-
-                    try {
-                        await syncTransactionsToCloud();
-                        await fetchData();
-                        isSubmitting.value = false;
-                        toastMessage.value = "開銷明細已刪除！";
-                        showSuccessToast.value = true;
-                        setTimeout(() => { showSuccessToast.value = false; }, 3000);
-                    } catch (err) {
-                        isSubmitting.value = false;
-                        alert('刪除失敗');
+                    if (isSubmitting.value) return;
+                    if (!remoteSnapshot || pendingSave.value) {
+                        syncError.value = '請先完成雲端載入或處理尚未確認的儲存，再刪除。';
+                        return;
                     }
-                }
+                    if (!confirm('確定要刪除這筆開銷紀錄嗎？')) return;
+                    transactions.value = transactions.value.filter(t => t.id !== id);
+                    await syncTransactionsToCloud();
+                };
 
                 return {
                     activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, filteredTransactions, categoryTotals,
                     formatDate, formatMoney, saveAllSummaries, fetchData,
-                    isSubmitting, showSuccessToast, toastMessage, showModal,
+                    isSubmitting, syncStatus, syncError, pendingSave, retrySave, showSuccessToast, toastMessage, showModal,
                     currentYM, currentAssetData, liquidAssetsTotal, investmentTotal, foreignCashTotal, totalAssets, saveAssetsRecord,
                     invEntieUSD_TWD, currJPY_TWD, currUSD_TWD, currHKD_TWD,
                     isEditing, openAddModal, openEditModal, closeModal, saveTransaction, deleteTransaction,
