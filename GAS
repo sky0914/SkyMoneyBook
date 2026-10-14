@@ -107,7 +107,7 @@ function rows_(ss, name) {
 }
 function read_(ss, key) {
   var timezone = ss.getSpreadsheetTimeZone();
-  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, stockRecords: []};
+  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}};
   if (!key || key === 'transactions') rows_(ss, '明細').forEach(function(r, i) {
     if (!r[0]) return;
     result.transactions.push({id: i + 1, date: date_(r[0], ss, timezone), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
@@ -129,11 +129,9 @@ function read_(ss, key) {
   result.datasetErrors = {};
   try { if (!key || key === 'fundsRecords') result.fundsRecords = readFunds_(ss); }
   catch (err) { result.datasetErrors.fundsRecords = String(err); }
-  try { if (!key || key === 'stockRecords') result.stockRecords = readStockRecords_(ss, timezone); }
-  catch (err) { result.datasetErrors.stockRecords = String(err); }
   result.revisions = {};
-  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','stockRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
-  result.protocolVersion = 5;
+  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
+  result.protocolVersion = 4;
   if (key) {
     var selected = {revisions: result.revisions, datasetErrors: result.datasetErrors, protocolVersion: result.protocolVersion};
     selected[key] = result[key];
@@ -144,9 +142,9 @@ function read_(ss, key) {
 function doGet(e) {
   var lock = LockService.getScriptLock();
   try {
-    var key = e && e.parameter && e.parameter.dataset;
     lock.waitLock(10000);
-    if (key && ['transactions','summaries','assetsRecords','fundsRecords','stockRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
+    var key = e && e.parameter && e.parameter.dataset;
+    if (key && ['transactions','summaries','assetsRecords','fundsRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
     return json_(read_(SpreadsheetApp.openById(BOOK_ID), key));
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
@@ -175,13 +173,11 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
     var payload = JSON.parse(e.postData.contents);
-    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveStocks: 'stockRecords'};
+    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords'};
     var key = actions[payload.action];
     if (!key || typeof payload.expectedRevision !== 'string') throw new Error('Unsupported action or missing revision; reload the updated webpage');
     var data = payload[key], rows, name;
-    if (key === 'stockRecords') {
-      name = '存股紀錄'; rows = stockRows_(data);
-    } else if (key === 'transactions') {
+    if (key === 'transactions') {
       if (!Array.isArray(data)) throw new Error('Invalid transactions');
       var ids = {};
       rows = [['日期','項目','金額','分類','類型']]; name = '明細';
@@ -226,76 +222,10 @@ function doPost(e) {
     var ss = SpreadsheetApp.openById(BOOK_ID), current = read_(ss, key);
     if (current.datasetErrors[key]) throw new Error(current.datasetErrors[key]);
     if (current.revisions[key] !== payload.expectedRevision) return json_({status: 'conflict', message: 'Cloud data changed; reload before saving'});
-    if (key === 'stockRecords') writeStockRows_(ss, rows);
-    else replaceRows_(ss, name, rows);
+    replaceRows_(ss, name, rows);
     SpreadsheetApp.flush();
     // The following targeted GET confirms persisted data; avoid a redundant read here.
     return json_({status: 'success'});
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
-}
-
-
-
-// Stock records are ordinary columns in the main bookkeeping workbook.
-var STOCK_HEADERS = ['ID','交易日期','股票代碼','股票名稱','交易類型','股數','單價','成交金額','手續費','交易稅／扣繳','現金股利','收支金額','備註'];
-var STOCK_TYPES = ['買進','賣出','現金股利','配股'];
-function stockMoney_(value) { return Math.sign(value) * Math.round((Math.abs(value) + Number.EPSILON) * 100) / 100; }
-function stockRecord_(raw) {
-  if (!object_(raw) || typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(raw.id) ||
-      typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date) ||
-      typeof raw.code !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,23}$/.test(raw.code) || STOCK_TYPES.indexOf(raw.type) < 0) throw new Error('存股紀錄的 ID、日期、代碼或交易類型無效');
-  var date = Utilities.parseDate(raw.date, 'Etc/UTC', 'yyyy-MM-dd');
-  if (Utilities.formatDate(date, 'Etc/UTC', 'yyyy-MM-dd') !== raw.date) throw new Error('存股交易日期無效');
-  var entry = {id: raw.id, date: raw.date, code: raw.code, name: String(raw.name || ''), type: raw.type,
-    quantity: numeric_(raw.quantity), price: numeric_(raw.price), fee: numeric_(raw.fee), tax: numeric_(raw.tax), dividend: numeric_(raw.dividend), note: String(raw.note || '')};
-  if (entry.name.length > 80 || entry.note.length > 2000 || [entry.quantity,entry.price,entry.fee,entry.tax,entry.dividend].some(function(v) { return v < 0; })) throw new Error('存股數值不得為負數，名稱或備註過長');
-  if (entry.type === '買進' || entry.type === '賣出') {
-    if (entry.quantity <= 0 || entry.price <= 0 || entry.dividend !== 0) throw new Error('買賣需填寫大於零的股數與單價');
-  } else if (entry.type === '現金股利') {
-    if (entry.dividend <= 0 || entry.quantity !== 0 || entry.price !== 0) throw new Error('現金股利金額需大於零');
-  } else if (entry.quantity <= 0 || entry.price !== 0 || entry.dividend !== 0) throw new Error('配股需填寫大於零的股數');
-  entry.gross = stockMoney_(entry.quantity * entry.price);
-  entry.cashFlow = stockMoney_(entry.type === '買進' ? -entry.gross-entry.fee-entry.tax : entry.type === '賣出' ? entry.gross-entry.fee-entry.tax : entry.type === '現金股利' ? entry.dividend-entry.fee-entry.tax : -entry.fee-entry.tax);
-  if (!isFinite(entry.gross) || !isFinite(entry.cashFlow)) throw new Error('存股金額超出可計算範圍');
-  return entry;
-}
-function readStockRecords_(ss, timezone) {
-  var sheet = ss.getSheetByName('存股紀錄');
-  if (!sheet || !sheet.getLastRow()) return [];
-  var values = sheet.getDataRange().getValues();
-  if (canonical_(values[0].slice(0, STOCK_HEADERS.length)) !== canonical_(STOCK_HEADERS)) throw new Error('存股紀錄欄位與新版規格不符，已停止讀寫，請保留原資料');
-  var ids = {};
-  return values.slice(1).filter(function(row) { return row.some(function(v) { return v !== ''; }); }).map(function(r) {
-    var entry = stockRecord_({id: String(r[0] || ''), date: date_(r[1], ss, timezone), code: String(r[2] || ''), name: r[3], type: r[4], quantity:r[5], price:r[6], fee:r[8], tax:r[9], dividend:r[10], note:r[12]});
-    if (ids[entry.id]) throw new Error('存股紀錄 ID 重複'); ids[entry.id] = true;
-    entry.gross = numeric_(r[7]); entry.cashFlow = numeric_(r[11]);
-    return entry;
-  });
-}
-function stockRows_(data) {
-  if (!Array.isArray(data)) throw new Error('Invalid stock records');
-  var ids = {}, rows = [STOCK_HEADERS.slice()];
-  data.forEach(function(raw, index) {
-    var entry = stockRecord_(raw), row = index + 2;
-    if (ids[entry.id]) throw new Error('存股紀錄 ID 重複'); ids[entry.id] = true;
-    var literal = function(text) { return text.charAt(0) === '=' || text.charAt(0) === "'" ? "'" + text : text; };
-    rows.push([entry.id,entry.date,entry.code,literal(entry.name),entry.type,entry.quantity,entry.price,
-      '=ROUND(F'+row+'*G'+row+',2)',entry.fee,entry.tax,entry.dividend,
-      '=ROUND(IF(E'+row+'="買進",-(H'+row+'+I'+row+'+J'+row+'),IF(E'+row+'="賣出",H'+row+'-I'+row+'-J'+row+',IF(E'+row+'="現金股利",K'+row+'-I'+row+'-J'+row+',-I'+row+'-J'+row+'))),2)',literal(entry.note)]);
-  });
-  return rows;
-}
-function writeStockRows_(ss, rows) {
-  var sheet = ss.getSheetByName('存股紀錄') || ss.insertSheet('存股紀錄');
-  if (sheet.getMaxRows() < Math.max(2, rows.length)) sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(2, rows.length)-sheet.getMaxRows());
-  if (sheet.getMaxColumns() < STOCK_HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), STOCK_HEADERS.length-sheet.getMaxColumns());
-  var count = Math.max(1, rows.length-1), timezone = ss.getSpreadsheetTimeZone();
-  [1,3,4,13].forEach(function(col) { sheet.getRange(2,col,count,1).setNumberFormat('@'); });
-  sheet.getRange(2,2,count,1).setNumberFormat('yyyy-mm-dd');
-  sheet.getRange(2,6,count,1).setNumberFormat('0.######');
-  sheet.getRange(2,7,count,1).setNumberFormat('0.####');
-  sheet.getRange(2,8,count,5).setNumberFormat('#,##0.00');
-  rows.slice(1).forEach(function(row) { row[1] = Utilities.parseDate(row[1], timezone, 'yyyy-MM-dd'); });
-  replaceRows_(ss,'存股紀錄',rows);
 }
