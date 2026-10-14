@@ -237,6 +237,11 @@
             </div>
         </header>
 
+        <div v-if="dirtySectionNames.length" role="status" class="mb-5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+            <i aria-hidden="true" class="fa-solid fa-circle-exclamation mr-2"></i>
+            尚未儲存：{{ dirtySectionNames.join('、') }}。請在對應頁面儲存修改。
+        </div>
+
         <!-- ================= 功能頁籤切換 ================= -->
         <div class="ledger-tabs flex gap-2.5 mb-6 border-b border-borderCol pb-3 overflow-x-auto" role="navigation" aria-label="財務功能">
             <button @click="activeTab = 'transactions'" :aria-current="activeTab === 'transactions' ? 'page' : null"
@@ -310,7 +315,7 @@
                     <div class="section-toolbar flex justify-between items-center">
                         <h2 class="font-semibold text-gray-200 text-base flex items-center gap-2">
                             <span>{{ selectedYear }} 年 {{ currentMonthNum }} 月份開銷明細</span>
-                            <span class="text-xs bg-cardBg border border-borderCol px-2.5 py-0.5 rounded-full text-gray-400">{{ filteredTransactions.length }} 筆</span>
+                            <span class="text-xs bg-cardBg border border-borderCol px-2.5 py-0.5 rounded-full text-gray-400">{{ searchQuery.trim() ? filteredTransactions.length + ' / ' + monthlyTransactions.length : monthlyTransactions.length }} 筆</span>
                         </h2>
                         <div class="flex items-center gap-2">
                             <button @click="openAddModal" class="primary-action bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 transition text-white px-3.5 py-2 rounded-xl text-xs font-medium shadow-md shadow-rose-500/20 flex items-center gap-1.5 cursor-pointer">
@@ -320,6 +325,12 @@
                                 <i aria-hidden="true" class="fa-solid fa-rotate"></i>
                             </button>
                         </div>
+                    </div>
+                    <div class="flex items-center gap-3 bg-cardBg rounded-xl border border-borderCol px-3 py-2.5">
+                        <i aria-hidden="true" class="fa-solid fa-magnifying-glass text-gray-400"></i>
+                        <label for="detail-search" class="sr-only">搜尋本月明細</label>
+                        <input id="detail-search" type="search" v-model="searchQuery" placeholder="搜尋本月項目名稱或分類…" class="min-w-0 flex-1 bg-transparent text-sm focus:outline-none rounded-lg px-2 py-1">
+                        <button v-if="searchQuery" @click="searchQuery = ''" class="shrink-0 text-xs text-accentBlue px-2 py-1 rounded-lg" aria-label="清除明細搜尋">清除</button>
                     </div>
                     <div class="bg-cardBg rounded-3xl border border-borderCol shadow-xl overflow-hidden">
                         <div class="overflow-x-auto max-h-[520px] overflow-y-auto">
@@ -335,7 +346,7 @@
                                 </thead>
                                 <tbody class="divide-y divide-borderCol/40">
                                     <tr v-if="filteredTransactions.length === 0">
-                                        <td colspan="5" class="text-center py-12 text-gray-500 text-sm">尚無當月開銷紀錄。</td>
+                                        <td colspan="5" class="text-center py-12 text-gray-500 text-sm">{{ searchQuery.trim() ? '找不到符合搜尋條件的明細。' : '尚無當月開銷紀錄。' }}</td>
                                     </tr>
                                     <tr v-for="item in filteredTransactions" :key="item.id" class="hover:bg-darkBg/50 transition">
                                         <td class="p-4 pl-5 text-gray-400 text-xs font-mono">{{ formatDate(item.date) }}</td>
@@ -880,8 +891,15 @@
                 const syncError = ref('');
                 const pendingSave = ref(null);
                 let remoteSnapshot = null;
+                const cleanData = ref({ transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {} });
                 let toastTimer;
                 const clone = value => JSON.parse(JSON.stringify(value));
+                // Automatic blank rows are clean defaults, not edits. Preserve existing baselines.
+                const registerDefaults = (key, path, defaults) => {
+                    let target = cleanData.value[key];
+                    for (const part of path) target = target[part] ||= {};
+                    for (const field in defaults) if (target[field] === undefined || target[field] === null) target[field] = clone(defaults[field]);
+                };
                 const canonical = value => JSON.stringify(normalize(value));
                 // 明細維持原本五欄，列號只供目前畫面編輯，不是儲存資料的一部分。
                 const sameDataset = (key, a, b) => canonical(key === 'transactions' ? a.map(({ id, ...row }) => row) : a) ===
@@ -927,6 +945,9 @@
                     category: '生活開銷'
                 })
 
+                const formBaseline = ref(clone(form.value));
+                const hasUnsavedForm = computed(() => showModal.value && canonical(form.value) !== canonical(formBaseline.value));
+
                 // 常用快速點選項目清單（支援自定義與 localStorage 持久化）
                 const savedCommonItems = localStorage.getItem('budget_common_items');
                 const commonItems = ref(savedCommonItems ? JSON.parse(savedCommonItems) : ['午餐', '晚餐', '早餐', '飲料/咖啡', '加油', '停車費', '超商購物', '網購']);
@@ -971,6 +992,7 @@
                         amount: '',
                         category: '生活開銷'
                     };
+                    formBaseline.value = clone(form.value);
                     showModal.value = true;
                 }
 
@@ -983,10 +1005,12 @@
                         amount: item.amount,
                         category: item.category
                     };
+                    formBaseline.value = clone(form.value);
                     showModal.value = true;
                 }
 
                 const closeModal = () => {
+                    if (hasUnsavedForm.value && !confirm('這筆明細尚未儲存，確定要放棄修改並關閉？')) return;
                     showModal.value = false;
                 }
 
@@ -999,6 +1023,7 @@
                         const defaults = { salary: 0, insurance: 0, extraIncome: 0, livingExpense: 0,
                             insuranceExpense: 0, otherExpense: 0, familyExpense: 0, note: '' };
                         for (const key in defaults) if (row[key] === undefined || row[key] === null) row[key] = defaults[key];
+                        registerDefaults('summaries', [year, m], defaults);
                     }
                 };
 
@@ -1008,12 +1033,14 @@
                     for (const fund of ['entieTWD', 'entieUSD', 'allianz']) {
                         const record = data[fund] ||= {};
                         for (const key of ['baseTotalInv', 'baseValue', 'baseNote']) if (record[key] === undefined || record[key] === null) record[key] = '';
+                        registerDefaults('fundsRecords', [year, fund], { baseTotalInv: '', baseValue: '', baseNote: '' });
                         record.months ||= {};
                         for (let m = 1; m <= 12; m++) {
                             const row = record.months[m] ||= {};
                             const defaults = fund === 'allianz' ? { interestUSD: '', rate: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' } :
                                 { interest: '', investment: '', fee: '', totalInvestment: '', value: '', note: '' };
                             for (const key in defaults) if (row[key] === undefined || row[key] === null) row[key] = defaults[key];
+                            registerDefaults('fundsRecords', [year, fund, 'months', m], defaults);
                         }
                     }
                 };
@@ -1147,6 +1174,7 @@
                             }
                         }
                     }
+                    registerDefaults('assetsRecords', [currentYM.value], emptyAssetTemplate());
                     return assetsRecords.value[currentYM.value];
                 });
 
@@ -1239,9 +1267,37 @@
                     }
                 }, { deep: true });
 
+                const datasetRefs = () => ({ transactions: transactions.value, summaries: allSummaries.value,
+                    assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value });
+                const editableSnapshot = (key, value) => {
+                    const strip = data => {
+                        if (Array.isArray(data)) return data.map(strip);
+                        if (!data || typeof data !== 'object') return data;
+                        const result = {};
+                        for (const field in data) {
+                            if (key === 'transactions' && field === 'id') continue;
+                            if (key === 'summaries' && ['month', 'livingExpense'].includes(field)) continue;
+                            if (key === 'assetsRecords' && ['invEntieUSD', 'currJPY', 'currUSD', 'currHKD'].includes(field)) continue;
+                            const v = data[field];
+                            if (v && typeof v === 'object') result[field] = strip(v);
+                            else if (['note', 'baseNote', 'date', 'title', 'category', 'type'].includes(field)) result[field] = String(v ?? '');
+                            else if (key === 'transactions') result[field] = v;
+                            else result[field] = key === 'fundsRecords' && (v === '' || v === null || v === undefined) ? '' : Number(v || 0);
+                        }
+                        return result;
+                    };
+                    return strip(value);
+                };
+                const datasetDirty = Object.fromEntries(Object.keys(cleanData.value).map(key => [key, computed(() =>
+                    canonical(editableSnapshot(key, datasetRefs()[key])) !== canonical(editableSnapshot(key, cleanData.value[key])))]));
+                const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
+                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資' };
+                const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
+                const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value);
+
                 const fetchData = async () => {
                     if (isSubmitting.value) return;
-                    if (remoteSnapshot && !confirm('重新載入將以雲端資料取代目前頁面的內容，尚未儲存的修改會遺失。確定繼續？')) return;
+                    if (hasUnsavedChanges.value && !confirm('有尚未儲存的修改。重新載入會以雲端資料取代目前內容，確定要放棄修改？')) return;
                     isSubmitting.value = true;
                     syncError.value = '';
                     showSuccessToast.value = false;
@@ -1262,6 +1318,9 @@
                                 allSummaries.value[y][m].livingExpense = getLivingExpenseTotalForMonth(Number(y), m);
                             }
                         }
+                        const current = datasetRefs();
+                        for (const key in current) if (!data.datasetErrors?.[key]) cleanData.value[key] = clone(current[key]);
+                        showModal.value = false;
                         syncStatus.value = '雲端資料讀取完成';
                         if (data.datasetErrors?.fundsRecords) {
                             syncError.value = '基金資料讀取失敗：' + data.datasetErrors.fundsRecords + '。其他頁面仍可使用；基金儲存已停止。';
@@ -1333,6 +1392,7 @@
                         remoteSnapshot[key] = clone(confirmed[key]);
                         remoteSnapshot.revisions[key] = confirmed.revisions[key];
                         if (key === 'transactions') transactions.value = clone(remoteSnapshot.transactions);
+                        cleanData.value[key] = clone(key === 'transactions' ? confirmed[key] : expected);
                         pendingSave.value = null;
                         syncStatus.value = '已重新讀取並確認儲存';
                         toastMessage.value = message;
@@ -1351,7 +1411,7 @@
                     }
                 };
                 window.addEventListener('beforeunload', event => {
-                    if (pendingSave.value || isSubmitting.value) { event.preventDefault(); event.returnValue = ''; }
+                    if (hasUnsavedChanges.value || isSubmitting.value) { event.preventDefault(); event.returnValue = ''; }
                 });
 
                 onMounted(() => {
@@ -1383,7 +1443,8 @@
                     return currentYearSummaries.value[currentMonthNum.value] || {};
                 });
 
-                const filteredTransactions = computed(() => {
+                const searchQuery = ref('');
+                const monthlyTransactions = computed(() => {
                     const y = selectedYear.value;
                     const m = String(currentMonthNum.value).padStart(2, '0');
                     const prefix = `${y}-${m}`;
@@ -1392,9 +1453,18 @@
                         .sort((a, b) => new Date(b.date) - new Date(a.date));
                 })
 
+                const filteredTransactions = computed(() => {
+                    const terms = searchQuery.value.normalize('NFKC').trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+                    if (!terms.length) return monthlyTransactions.value;
+                    return monthlyTransactions.value.filter(item => {
+                        const text = `${item.title || ''} ${item.category || '其它'}`.normalize('NFKC').toLocaleLowerCase();
+                        return terms.every(term => text.includes(term));
+                    });
+                });
+
                 const categoryTotals = computed(() => {
                     const totals = {};
-                    filteredTransactions.value.forEach(item => {
+                    monthlyTransactions.value.forEach(item => {
                         const cat = item.category || '其它';
                         totals[cat] = (totals[cat] || 0) + Number(item.amount || 0);
                     });
@@ -1470,7 +1540,8 @@
                 return {
                     activeTab, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
-                    currentYearSummaries, currentSummary, filteredTransactions, categoryTotals,
+                    currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
+                    hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,
                     formatDate, formatMoney, saveAllSummaries, fetchData,
                     isSubmitting, syncStatus, syncError, pendingSave, retrySave, showSuccessToast, toastMessage, showModal,
                     currentYM, currentAssetData, liquidAssetsTotal, investmentTotal, foreignCashTotal, totalAssets, saveAssetsRecord,

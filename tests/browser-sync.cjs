@@ -28,6 +28,18 @@ const {backend}=require('./helpers.cjs');
   const state=async(fn)=>page.evaluate(fn);
   await state(()=>{const s=document.querySelector('#app').__vue_app__._container._vnode.component.setupState;s.selectedYear=2026;s.currentMonthNum=10;s.form={date:'2026-10-14',title:'瀏覽器測試',amount:100,category:'生活開銷'};return s.saveTransaction()});
   assert.equal(api.read().transactions[0].title,'瀏覽器測試');
+  assert.equal(await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.hasUnsavedChanges),false);
+  const search=page.getByRole('searchbox',{name:'搜尋本月明細'});
+  await search.fill('找不到');await page.getByText('找不到符合搜尋條件的明細。',{exact:true}).waitFor();
+  const categoryBefore=await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.categoryTotals);
+  await search.fill('生活開銷');assert.equal(await page.locator('.transaction-table tbody tr').count(),1);
+  await page.getByRole('button',{name:'清除明細搜尋'}).click();assert.equal(await search.inputValue(),'');
+  assert.deepEqual(await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.categoryTotals),categoryBefore);
+  await page.getByRole('button',{name:/年收支摘要總表/}).click();
+  await page.locator('input[type=number]:visible').first().fill('123');
+  await page.getByText(/尚未儲存：年度收支/).waitFor();
+  await page.getByRole('button',{name:/年基金投資記錄/}).click();await page.getByText(/尚未儲存：年度收支/).waitFor();
+  console.log('Search and retained cross-tab unsaved notice passed');
   for(const [tab,key,edit,button] of [
    ['年收支摘要總表','summaries',s=>{s.currentYearSummaries[1].salary=123},'儲存'],
    ['年基金投資記錄','fundsRecords',s=>{s.currentFundsData.allianz.baseValue=99},'儲存'],
@@ -46,5 +58,16 @@ const {backend}=require('./helpers.cjs');
   const data=await state(()=>{const s=document.querySelector('#app').__vue_app__._container._vnode.component.setupState;return {salary:s.currentYearSummaries[1].salary,fund:s.currentFundsData.allianz.baseValue,cash:s.currentAssetData.cash,living:s.currentYearSummaries[10].livingExpense}});
   assert.deepEqual(data,{salary:123,fund:99,cash:50,living:100});
   console.log('Browser reload preserved all values; no page errors');
+  assert.equal(await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.hasUnsavedChanges),false);
+  await page.getByRole('button',{name:/日常開銷明細/}).click();
+  await page.getByRole('button',{name:'記一筆',exact:true}).click();
+  await page.getByPlaceholder('例如：午餐、加油').fill('尚未儲存的明細');
+  page.removeAllListeners('dialog');let prompted=false;page.on('dialog',async dialog=>{prompted=true;await dialog.dismiss()});
+  await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(prompted,true);
+  assert.equal(await page.getByPlaceholder('例如：午餐、加油').isVisible(),true);
+  assert.equal(await state(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented}),true);
+  page.removeAllListeners('dialog');page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'取消',exact:true}).click();
+  assert.equal(await state(()=>document.querySelector('#app').__vue_app__._container._vnode.component.setupState.hasUnsavedChanges),false);
+  console.log('Modal discard confirmation and beforeunload protection passed');
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});

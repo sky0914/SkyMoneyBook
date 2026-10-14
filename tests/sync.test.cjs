@@ -122,3 +122,43 @@ test('optimized frontend remains compatible with the full-read version 3 API',as
  const api=backend(),compat={post:api.post,read:()=>{const data=api.read();data.protocolVersion=3;return data}};
  const f=frontend(compat),a=f.app;await a.fetchData();a.currentAssetData.value.cash=32;await a.saveAssetsRecord();assert.equal(a.pendingSave.value,null);assert.equal(api.read().assetsRecords[a.currentYM.value].cash,32);
 });
+test('opening new years and default asset records does not trigger unsaved warnings',async()=>{
+ const a=frontend(backend()).app;await a.fetchData();assert.equal(a.hasUnsavedChanges.value,false);
+ a.currentAssetData.value;a.currentFundsData.value;a.currentYearSummaries.value;assert.equal(a.hasUnsavedChanges.value,false);
+ a.selectedYear.value+=1;a.currentAssetData.value;a.currentFundsData.value;a.currentYearSummaries.value;
+ assert.equal(a.hasUnsavedChanges.value,false);a.currentYearSummaries.value[1].salary=12;assert.ok(a.dirtySections.value.includes('summaries'));
+ a.currentYearSummaries.value[1].salary=0;assert.equal(a.hasUnsavedChanges.value,false);
+});
+test('saving one page clears only that page and derived values do not count as edits',async()=>{
+ const api=backend(),a=frontend(api).app;await a.fetchData();a.currentAssetData.value;
+ a.currentYearSummaries.value[1].salary=10;a.currentFundsData.value.allianz.baseValue=20;a.currentAssetData.value.cash=30;
+ assert.deepEqual(Array.from(a.dirtySections.value).sort(),['assetsRecords','fundsRecords','summaries']);
+ await a.saveFundsRecord();assert.deepEqual(Array.from(a.dirtySections.value).sort(),['assetsRecords','summaries']);
+ await a.saveAssetsRecord();assert.deepEqual(Array.from(a.dirtySections.value),['summaries']);
+ await a.saveAllSummaries();assert.equal(a.hasUnsavedChanges.value,false);
+ a.currentYearSummaries.value[1].livingExpense=123;a.currentAssetData.value.currUSD=456;assert.equal(a.hasUnsavedChanges.value,false);
+});
+test('refresh cancels without losing changes, and leaving warns only for actual edits',async()=>{
+ const f=frontend(backend()),a=f.app;await a.fetchData();const cleanEvent={preventDefault(){this.prevented=true}};f.emit('beforeunload',cleanEvent);assert.equal(cleanEvent.prevented,undefined);
+ a.currentYearSummaries.value[1].salary=100;f.setConfirm(false);const start=f.requests.length;await a.fetchData();assert.equal(f.requests.length,start);assert.equal(a.currentYearSummaries.value[1].salary,100);
+ const dirtyEvent={preventDefault(){this.prevented=true}};f.emit('beforeunload',dirtyEvent);assert.equal(dirtyEvent.prevented,true);assert.equal(dirtyEvent.returnValue,'');
+ f.setConfirm(true);await a.fetchData();assert.equal(a.currentYearSummaries.value[1].salary,0);assert.equal(a.hasUnsavedChanges.value,false);
+});
+test('new and edited transaction forms prompt on cancellation only after modification',async()=>{
+ const api=backend(),f=frontend(api),a=f.app;await a.fetchData();a.openAddModal();assert.equal(a.hasUnsavedForm.value,false);
+ a.appendItemTitle('午餐');assert.equal(a.hasUnsavedChanges.value,true);f.setConfirm(false);a.closeModal();assert.equal(a.showModal.value,true);
+ f.setConfirm(true);a.closeModal();assert.equal(a.hasUnsavedChanges.value,false);
+ a.openAddModal();a.form.value.title='午餐';a.form.value.amount=100;await a.saveTransaction();assert.equal(a.hasUnsavedChanges.value,false);
+ a.openEditModal(api.read().transactions[0]);assert.equal(a.hasUnsavedForm.value,false);a.form.value.amount=200;assert.equal(a.hasUnsavedForm.value,true);
+ f.setConfirm(false);a.closeModal();assert.equal(a.showModal.value,true);assert.equal(api.read().transactions[0].amount,100);
+});
+test('search handles name/category, case and whitespace without changing month totals or dirty state',async()=>{
+ const api=backend();api.seed('明細',[['日期','項目','金額','分類','類型'],['2026-10-14','飲料/咖啡、加油',500,'生活開銷','expense'],['2026-10-13','Online Shopping',800,'其它','expense'],['2026-09-01','加油',200,'生活開銷','expense']]);
+ const a=frontend(api).app;a.selectedYear.value=2026;a.currentMonthNum.value=10;await a.fetchData();const totals=JSON.stringify(a.categoryTotals.value);
+ a.searchQuery.value=' 加油 ';assert.equal(a.filteredTransactions.value.length,1);assert.equal(a.monthlyTransactions.value.length,2);
+ a.searchQuery.value='生活開銷';assert.equal(a.filteredTransactions.value.length,1);
+ a.searchQuery.value='ｏｎｌｉｎｅ';assert.equal(a.filteredTransactions.value[0].title,'Online Shopping');
+ a.searchQuery.value='飲料 加油';assert.equal(a.filteredTransactions.value.length,1);a.searchQuery.value='找不到';assert.equal(a.filteredTransactions.value.length,0);
+ assert.equal(JSON.stringify(a.categoryTotals.value),totals);assert.equal(a.hasUnsavedChanges.value,false);
+ a.searchQuery.value='  ';assert.equal(a.filteredTransactions.value.length,2);a.searchQuery.value='';assert.equal(a.filteredTransactions.value.length,2);
+});

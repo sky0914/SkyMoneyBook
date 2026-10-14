@@ -11,9 +11,9 @@ function backend(){
  return {ctx, seed:(name,rows)=>{sheets[name]=sheet(name);sheets[name].rows=rows}, reads,resetReads:()=>{for(const name in reads) delete reads[name]}, read:key=>ctx.doGet({parameter:{dataset:key}}),post:p=>ctx.doPost({postData:{contents:JSON.stringify(p)}}),sheets};
 }
 function frontend(api){
- let app; let mode='normal'; let posts=0; const requests=[];
+ let app; let mode='normal'; let posts=0; const requests=[]; const listeners={}; const confirmations=[]; let confirmAnswer=true;
  const ref=value=>({value});
- const ctx=vm.createContext({Vue:{ref,computed:f=>({get value(){return typeof f==='function'?f():f.get()}}),watch(){},onMounted(){},createApp:opts=>({mount(){app=opts.setup()}})},localStorage:{getItem:()=>null,setItem(){}},window:{addEventListener(){}},confirm:()=>true,AbortController,console,setTimeout:(fn,ms)=>ms===15000?1:setTimeout(fn,0),clearTimeout(){},fetch:async(url,opts)=>{
+ const ctx=vm.createContext({Vue:{ref,computed:f=>({get value(){return typeof f==='function'?f():f.get()}}),watch(){},onMounted(){},createApp:opts=>({mount(){app=opts.setup()}})},localStorage:{getItem:()=>null,setItem(){}},window:{addEventListener:(name,handler)=>listeners[name]=handler},confirm:message=>{confirmations.push(message);return confirmAnswer},AbortController,console,setTimeout:(fn,ms)=>ms===15000?1:setTimeout(fn,0),clearTimeout(){},fetch:async(url,opts)=>{
  requests.push({method:opts.method,dataset:new URL(url).searchParams.get('dataset')});
  if(mode==='offline' || (mode==='lost-confirmation' && posts > 0 && opts.method==='GET')) throw new Error('offline');
  if(opts.method==='POST'){posts++; if(mode==='drop')return {type:'opaque'}; api.post(JSON.parse(opts.body));return {type:'opaque'};}
@@ -21,6 +21,6 @@ function frontend(api){
  }});
  const html=fs.readFileSync('index.html','utf8');
  vm.runInContext([...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1],ctx);
- return {app,setMode:m=>mode=m,posts:()=>posts,requests};
+ return {app,setMode:m=>mode=m,posts:()=>posts,requests,confirmations,setConfirm:value=>confirmAnswer=value,emit:(name,event)=>listeners[name]?.(event)};
 }
 module.exports={backend,frontend};
