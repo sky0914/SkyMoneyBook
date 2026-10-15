@@ -350,39 +350,51 @@
 
         <!-- ================= 頁籤：股票 ================= -->
         <section v-show="activeTab === 'stocks'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
-            <nav class="flex gap-2 mb-4" aria-label="股票代碼">
+            <nav class="flex flex-wrap gap-2 mb-4" aria-label="股票代碼">
                 <button @click="activeStockView = 'overview'" :aria-current="activeStockView === 'overview' ? 'page' : null" :class="activeStockView === 'overview' ? 'tab-active' : 'tab-idle'" class="px-4 py-2 rounded-xl text-sm font-medium transition border cursor-pointer">總覽</button>
-                <button v-for="code in ['00878', '00919']" :key="code" @click="activeStockCode = code; activeStockView = 'detail'" :aria-current="activeStockView === 'detail' && activeStockCode === code ? 'page' : null" :class="activeStockView === 'detail' && activeStockCode === code ? 'tab-active' : 'tab-idle'" class="px-4 py-2 rounded-xl text-sm font-medium transition border cursor-pointer">{{ code }}</button>
+                <button v-for="code in stockCodes" :key="code" @click="activeStockCode = code; activeStockView = 'detail'" :aria-current="activeStockView === 'detail' && activeStockCode === code ? 'page' : null" :class="activeStockView === 'detail' && activeStockCode === code ? 'tab-active' : 'tab-idle'" class="px-4 py-2 rounded-xl text-sm font-medium transition border cursor-pointer">{{ code }}</button>
             </nav>
             <div v-show="activeStockView === 'overview'">
-                <h2 id="stock-portfolio-title" class="text-lg font-semibold text-white mb-2">{{ selectedYear }} 股票市值</h2>
+                <div class="mb-6" role="group" aria-label="股票歷年累計">
+                    <h2 class="text-lg font-semibold text-white mb-2">歷年累計</h2>
+                    <p class="text-xs text-gray-400 mb-3">加總所有已輸入年度，各年度只計算一次。</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="bg-darkBg border border-borderCol rounded-xl px-4 py-3 flex items-center justify-between gap-3"><span class="text-sm text-gray-400">總配息</span><span class="font-semibold font-mono">{{ formatMoney(stockCumulativeTotals.dividends) }}</span></div>
+                        <div class="bg-darkBg border border-borderCol rounded-xl px-4 py-3 flex items-center justify-between gap-3"><span class="text-sm text-gray-400">總收益</span><span class="font-semibold font-mono text-rose-400">{{ formatMoney(stockCumulativeTotals.totalReturn) }}</span></div>
+                    </div>
+                </div>
+                <section v-for="portfolio in stockPortfolioSections" :key="portfolio.year" class="mb-6 last:mb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h2 :id="'stock-portfolio-' + portfolio.year" class="text-lg font-semibold text-white">{{ portfolio.year }} 年股票市值</h2>
+                    <div class="inline-flex items-center gap-3 bg-darkBg border border-borderCol rounded-xl px-3 py-1.5 whitespace-nowrap" :aria-label="portfolio.year + ' 年退手續費'">
+                        <span class="text-xs text-gray-400">年度退手續費</span>
+                        <span class="text-sm font-semibold font-mono text-emerald-400">{{ formatMoney(portfolio.refund) }}</span>
+                    </div>
+                </div>
+                <p v-if="portfolio.previous" class="text-xs text-gray-400 mb-2">與該年度共用資料；可補填結算值，清空後會依該年明細計算。</p>
                 <p class="text-xs text-gray-400 mb-3">配息月份：00878（2／5／8／11）、00919（3／6／9／12）、0056（1／4／7／10）、00982A（2／5／8／11）</p>
                 <div class="cashflow-scroll overflow-x-auto">
-                    <table class="stock-table stock-portfolio-table cashflow-table text-sm border-collapse" aria-labelledby="stock-portfolio-title">
+                    <table class="stock-table stock-portfolio-table cashflow-table text-sm border-collapse" :aria-labelledby="'stock-portfolio-' + portfolio.year">
                         <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">標的</th><th v-for="field in stockPortfolioFields" :key="field.key" scope="col" class="border border-borderCol">{{ field.label }}</th></tr></thead>
                         <tbody>
-                            <tr v-for="row in stockPortfolioRows" :key="row.code">
+                            <tr v-for="row in portfolio.rows" :key="row.code">
                                 <th scope="row" class="border border-borderCol font-normal">{{ row.code }}</th>
-                                <td v-for="field in stockPortfolioFields" :key="field.key" class="border border-borderCol font-mono"><input type="number" v-model.number="row.overview[field.key]" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" :aria-label="row.code + ' 總覽' + field.label" placeholder="—" class="text-center"></td>
+                                <td v-for="field in stockPortfolioFields" :key="field.key" class="border border-borderCol font-mono"><input type="number" v-model.number="row.overview[field.key]" :readonly="!portfolio.previous && isStockDerivedField(row.code, field.key)" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" :aria-label="portfolio.year + ' 年 ' + row.code + ' 總覽' + field.label" placeholder="—" class="text-center"></td>
                             </tr>
                         </tbody>
                         <tfoot>
                             <tr class="bg-darkBg font-semibold">
-                                <th scope="row" colspan="3" class="border border-borderCol text-center">總計</th>
-                                <td class="border border-borderCol font-mono">{{ formatMoney(stockPortfolioTotals.cost) }}</td>
-                                <td class="border border-borderCol font-mono">{{ formatMoney(stockPortfolioTotals.netValue) }}</td>
-                                <td class="border border-borderCol font-mono text-blue-400">{{ formatMoney(stockPortfolioTotals.profit) }}</td>
-                                <td class="border border-borderCol font-mono">{{ formatMoney(stockPortfolioTotals.dividends) }}</td>
-                                <td class="border border-borderCol font-mono text-rose-400">{{ formatMoney(stockPortfolioTotals.totalReturn) }}</td>
-                            </tr>
-                            <tr class="bg-darkBg font-semibold">
-                                <th scope="row" class="border border-borderCol">退手續費</th><td class="border border-borderCol font-mono">{{ formatMoney(stockPortfolioRefundTotal) }}</td>
-                                <th scope="row" colspan="2" class="border border-borderCol text-center">總配息</th><td class="border border-borderCol font-mono">{{ formatMoney(stockPortfolioTotals.dividends) }}</td>
-                                <th scope="row" colspan="2" class="border border-borderCol text-center">總收益</th><td class="border border-borderCol font-mono text-rose-400">{{ formatMoney(stockPortfolioTotals.totalReturn) }}</td>
+                                <th scope="row" colspan="3" class="border border-borderCol text-center">當年度合計</th>
+                                <td class="border border-borderCol font-mono">{{ formatMoney(portfolio.totals.cost) }}</td>
+                                <td class="border border-borderCol font-mono">{{ formatMoney(portfolio.totals.netValue) }}</td>
+                                <td class="border border-borderCol font-mono text-blue-400">{{ formatMoney(portfolio.totals.profit) }}</td>
+                                <td class="border border-borderCol font-mono">{{ formatMoney(portfolio.totals.dividends) }}</td>
+                                <td class="border border-borderCol font-mono text-rose-400">{{ formatMoney(portfolio.totals.totalReturn) }}</td>
                             </tr>
                         </tfoot>
                     </table>
                 </div>
+                </section>
             </div>
             <div v-show="activeStockView === 'detail'">
             <div class="stock-overview" role="group" :aria-label="activeStockCode + ' 投資總覽'">
@@ -390,7 +402,7 @@
                     <tbody>
                         <tr v-for="field in group" :key="field.key" :class="field.key === 'profit' ? 'overview-profit' : field.key === 'totalReturn' ? 'overview-total' : ''">
                             <th scope="row"><label :for="'stock-overview-' + field.key">{{ field.label }}</label></th>
-                            <td><input :id="'stock-overview-' + field.key" type="number" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" v-model.number="stockOverview[field.key]" placeholder="—" :aria-label="activeStockCode + ' ' + field.label"></td>
+                            <td><input :id="'stock-overview-' + field.key" type="number" :readonly="isStockDerivedField(activeStockCode, field.key)" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" v-model.number="stockOverview[field.key]" placeholder="—" :aria-label="activeStockCode + ' ' + field.label"></td>
                         </tr>
                         <tr v-if="group.length < 3" aria-hidden="true"><td colspan="2">&nbsp;</td></tr>
                     </tbody>
@@ -402,14 +414,14 @@
                 <h2 id="stock-record-title" class="text-lg font-semibold text-white mb-3">定期定額</h2>
                 <div class="cashflow-scroll overflow-x-auto">
                     <table class="stock-table cashflow-table w-full text-sm border-collapse" aria-labelledby="stock-record-title">
-                        <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">時間</th><th scope="col" class="border border-borderCol">購入數量</th><th scope="col" class="border border-borderCol">購入價格</th><th scope="col" class="border border-borderCol">手續費</th><th scope="col" class="border border-borderCol">股價</th></tr></thead>
+                        <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">時間</th><th scope="col" class="border border-borderCol">購入數量</th><th scope="col" class="border border-borderCol">購入價格</th><th scope="col" class="border border-borderCol">手續費</th><th scope="col" class="border border-borderCol">平均單價</th></tr></thead>
                         <tbody>
                             <tr v-for="row in stockDisplayRows" :key="row.month">
                                 <th scope="row" class="border border-borderCol font-normal">{{ row.month }}月定期</th>
                                 <td class="border border-borderCol font-mono">{{ row.quantity === null ? '' : row.quantity.toFixed(3) }}</td>
                                 <td class="border border-borderCol font-mono">{{ row.purchase === null ? '' : formatMoney(row.purchase) }}</td>
                                 <td class="border border-borderCol font-mono">{{ row.fee === null ? '' : formatMoney(row.fee) }}</td>
-                                <td class="border border-borderCol font-mono"></td>
+                                <td class="border border-borderCol font-mono">{{ row.averagePrice === null ? '' : row.averagePrice.toFixed(2) }}</td>
                             </tr>
                         </tbody>
                         <tfoot><tr class="bg-darkBg font-semibold">
@@ -417,7 +429,7 @@
                             <td class="border border-borderCol font-mono">{{ stockRegularTotals.quantity.toFixed(3) }}</td>
                             <td class="border border-borderCol font-mono">{{ formatMoney(stockRegularTotals.purchase) }}</td>
                             <td class="border border-borderCol font-mono">{{ formatMoney(stockRegularTotals.fee) }}</td>
-                            <td class="border border-borderCol"></td>
+                            <td class="border border-borderCol font-mono">{{ stockRegularAveragePrice === null ? '' : stockRegularAveragePrice.toFixed(2) }}</td>
                         </tr></tfoot>
                     </table>
                 </div>
@@ -492,7 +504,7 @@
                                     <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.payDate ? '' : 'text-gray-400'">{{ stockDateDisplay(row.payDate) || '月/日' }}</span><input type="date" :value="stockDateInputValue(row.payDate)" @input="row.payDate = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆發放日'"></div></td>
                                     <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.001" v-model.number="row.shares" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆股數'" placeholder="—" class="text-center"></td>
                                     <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.0001" v-model.number="row.perShare" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆每股利息'" placeholder="—" class="text-center"></td>
-                                    <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.cashDividend" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆現金股利'" placeholder="—" class="text-center"></td>
+                                    <td class="border border-borderCol font-mono"><input type="number" readonly step="any" :value="stockDividendCash(row)" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆現金股利'" placeholder="—" title="自動計算：股數 × 每股利息 × 1,000" class="text-center"></td>
                                     <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.transferFee" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆轉帳手續'" placeholder="—" class="text-center"></td>
                                 </tr>
                             </tbody>
@@ -1153,6 +1165,7 @@
         createApp({
             setup() {
                 const activeTab = ref('transactions')
+                const selectedYear = ref(new Date().getFullYear())
                 const currentStockMonth = () => Number(new Intl.DateTimeFormat('en-US', { month: 'numeric', timeZone: 'Asia/Taipei' }).format(new Date()));
                 const emptyStockMonths = () => Object.fromEntries(Array.from({ length: 12 }, (_, index) => [index + 1,
                     Array.from({ length: 15 }, () => ({ date: '', shares: null, fee: null, price: null }))
@@ -1165,25 +1178,55 @@
                     [{ key: 'estimatedTax', label: '預估交易稅' }, { key: 'profit', label: '投資損益', signed: true }],
                     [{ key: 'dividends', label: '配息' }, { key: 'totalReturn', label: '總收益', signed: true }]
                 ];
-                const stockRecords = ref(Object.fromEntries(['00878', '00919'].map(code => [code, {
-                        overview: Object.fromEntries(stockOverviewGroups.flat().map(field => [field.key, null])),
-                        manualRows: Array.from({ length: 12 }, () => ({ date: '', quantity: null, purchase: null, fee: null, price: null })),
-                        refundAmounts: Array(12).fill(null), monthlyRecords: emptyStockMonths(),
-                        dividends: Array.from({ length: 4 }, () => ({ exDate: '', payDate: '', shares: null, perShare: null, cashDividend: null, transferFee: null }))
-                }])));
-                const currentStockRecord = computed(() => stockRecords.value[activeStockCode.value]);
-                const stockOverview = computed(() => currentStockRecord.value.overview);
+                const stockCodes = ['00878', '00919', '0056', '00982A', '0050'];
+                const detailedStockCodes = stockCodes;
+                const hasStockValue = value => value !== null && value !== undefined && value !== '';
+                const emptyStockRecord = () => ({
+                    overview: Object.fromEntries(stockOverviewGroups.flat().map(field => [field.key, null])),
+                    manualRows: Array.from({ length: 12 }, () => ({ date: '', quantity: null, purchase: null, fee: null, price: null })),
+                    monthlyRecords: emptyStockMonths(),
+                    dividends: Array.from({ length: 4 }, () => ({ exDate: '', payDate: '', shares: null, perShare: null, transferFee: null }))
+                });
+                // Canonical source: year -> stocks -> code -> inputs. Derived totals are not stored.
+                const stockRecords = ref({});
+                const ensureStockYear = year => stockRecords.value[year] ||= {
+                    stocks: Object.fromEntries(stockCodes.map(code => [code, emptyStockRecord()]))
+                };
+                const stockRecordForYear = (year, code) => ensureStockYear(year).stocks[code];
+                const currentStockRecord = computed(() => stockRecordForYear(selectedYear.value, activeStockCode.value));
+                const isStockDerivedField = (code, key) => key === 'marketValue' ||
+                    (detailedStockCodes.includes(code) && ['lots', 'cost', 'netValue', 'profit', 'dividends', 'totalReturn'].includes(key));
+                const stockOverviewForCode = (code, year, historical = false) => new Proxy(stockRecordForYear(year, code).overview, {
+                    get: (target, key) => {
+                        // Manually entered annual closing values are shared with that year's main view.
+                        if (isStockDerivedField(code, key) && hasStockValue(target[key])) return Reflect.get(target, key);
+                        if (key === 'marketValue') return stockMarketValue(target, code, year);
+                        if (detailedStockCodes.includes(code) && key === 'lots') return stockLotsForYear(year, code);
+                        if (detailedStockCodes.includes(code) && key === 'netValue') return stockNetValue(target, code, year);
+                        if (detailedStockCodes.includes(code) && key === 'profit') return stockInvestmentProfit(code, target, year);
+                        if (detailedStockCodes.includes(code) && key === 'dividends') return stockNetDividends(code, year);
+                        if (detailedStockCodes.includes(code) && key === 'totalReturn') return stockTotalReturn(code, target, year);
+                        if (detailedStockCodes.includes(code) && key === 'cost') return stockCostForYear(year, code);
+                        return Reflect.get(target, key);
+                    },
+                    set: (target, key, value) => !historical && isStockDerivedField(code, key) ? true : Reflect.set(target, key, value)
+                });
+                const stockOverview = computed(() => stockOverviewForCode(activeStockCode.value, selectedYear.value));
                 const stockPortfolioFields = [
                     { key: 'lots', label: '股數（張）', step: '0.001' }, { key: 'price', label: '股價' },
                     { key: 'cost', label: '投入成本' }, { key: 'netValue', label: '參考淨值' },
                     { key: 'profit', label: '投資損益', signed: true }, { key: 'dividends', label: '配息' },
                     { key: 'totalReturn', label: '總收益', signed: true }
                 ];
-                const stockExtraOverviews = ref(Object.fromEntries(['0056', '00982A', '0050', '6757'].map(code =>
-                    [code, Object.fromEntries(stockOverviewGroups.flat().map(field => [field.key, null]))])));
-                const stockPortfolioRows = computed(() => ['00878', '00919', '0056', '00982A', '0050', '6757'].map(code => ({
-                    code, overview: stockRecords.value[code]?.overview || stockExtraOverviews.value[code]
-                })));
+                const stockPortfolioRowsForYear = (year, historical = false) => stockCodes.map(code => ({
+                    code, overview: stockOverviewForCode(code, year, historical)
+                }));
+                const stockPortfolioRows = computed(() => stockPortfolioRowsForYear(selectedYear.value));
+                const previousStockYear = computed(() => ensureStockYear(selectedYear.value - 1));
+                const previousStockPortfolio = computed(() => ({
+                    rows: stockPortfolioRowsForYear(selectedYear.value - 1, true),
+                    refund: stockRefundTotalForYear(selectedYear.value - 1)
+                }));
                 const stockDisplayRows = computed(() => Array.from({ length: 12 }, (_, index) => {
                     const month = index + 1;
                     const rows = currentStockRecord.value.monthlyRecords[month];
@@ -1193,11 +1236,12 @@
                         month,
                         quantity: rows.some(row => hasValue(row.shares)) ? totals.shares / 1000 : null,
                         purchase: rows.some(row => stockPurchase(row) !== '') ? totals.purchase : null,
-                        fee: rows.some(row => hasValue(row.fee)) ? totals.fee : null
+                        fee: rows.some(row => hasValue(row.fee)) ? totals.fee : null,
+                        averagePrice: stockAveragePrice(rows)
                     };
                 }));
                 const stockManualDisplayRows = computed(() => currentStockRecord.value.manualRows);
-                const stockRefundAmounts = computed(() => currentStockRecord.value.refundAmounts);
+                const stockRefundAmounts = computed(() => stockRefundsForRecord(currentStockRecord.value));
                 const stockDividendRows = computed(() => currentStockRecord.value.dividends);
                 const stockRefundTotal = computed(() => stockRefundAmounts.value.reduce((total, amount) => total + (amount ?? 0), 0));
                 const selectedStockMonth = ref(currentStockMonth());
@@ -1226,10 +1270,65 @@
                 };
                 const stockInputNumber = value => Number.isFinite(Number(value)) ? Number(value) : 0;
                 const stockInputRound = value => Math.round((value + Number.EPSILON) * 100) / 100;
-                const stockPortfolioTotals = computed(() => Object.fromEntries(['cost', 'netValue', 'profit', 'dividends', 'totalReturn'].map(key =>
-                    [key, stockInputRound(stockPortfolioRows.value.reduce((sum, row) => sum + stockInputNumber(row.overview[key]), 0))])));
-                const stockPortfolioRefundTotal = computed(() => stockInputRound(Object.values(stockRecords.value).reduce((sum, record) =>
-                    sum + record.refundAmounts.reduce((subtotal, amount) => subtotal + stockInputNumber(amount), 0), 0)));
+                const stockDividendCash = row => {
+                    if ([row.shares, row.perShare].some(value => value === null || value === undefined || value === '')) return '';
+                    const value = Number(row.shares) * Number(row.perShare) * 1000;
+                    return Number.isFinite(value) ? Number(value.toPrecision(15)) : '';
+                };
+                const stockCashDividends = (code, year = selectedYear.value) => Number(stockRecordForYear(year, code).dividends.reduce((sum, row) =>
+                    sum + stockInputNumber(stockDividendCash(row)), 0).toPrecision(15));
+                const stockNetDividends = (code, year = selectedYear.value) => {
+                    const fees = stockRecordForYear(year, code).dividends.reduce((sum, row) => sum + stockInputNumber(row.transferFee), 0);
+                    return Number((stockCashDividends(code, year) - stockInputRound(fees)).toPrecision(15));
+                };
+                const stockMarketValue = (overview, code, year) => {
+                    const lots = stockLotsForYear(year, code);
+                    if (!hasStockValue(overview.price)) return null;
+                    const value = Number(overview.price) * lots * 1000;
+                    return Number.isFinite(value) ? Math.trunc(Number(value.toPrecision(15))) : null;
+                };
+                const stockNetValue = (overview, code, year) => {
+                    const marketValue = stockMarketValue(overview, code, year);
+                    return marketValue === null ? null : stockInputRound(marketValue - stockInputNumber(overview.estimatedFee) - stockInputNumber(overview.estimatedTax));
+                };
+                const stockInvestmentProfit = (code, overview, year) => {
+                    const netValue = hasStockValue(overview.netValue) ? stockInputNumber(overview.netValue) : stockNetValue(overview, code, year);
+                    const cost = detailedStockCodes.includes(code) ? stockCostForYear(year, code) : overview.cost;
+                    if (netValue === null || cost === null || cost === undefined || cost === '') return null;
+                    return stockInputRound(netValue - stockInputNumber(cost));
+                };
+                const stockTotalReturn = (code, overview, year) => {
+                    const profit = hasStockValue(overview.profit) ? stockInputNumber(overview.profit) : stockInvestmentProfit(code, overview, year);
+                    if (profit === null) return null;
+                    const dividends = hasStockValue(overview.dividends) ? stockInputNumber(overview.dividends) : stockNetDividends(code, year);
+                    return stockInputRound(profit + dividends);
+                };
+                const sumStockPortfolio = rows => Object.fromEntries(['cost', 'netValue', 'profit', 'dividends', 'totalReturn'].map(key =>
+                    [key, stockInputRound(rows.reduce((sum, row) => sum + stockInputNumber(row.overview[key]), 0))]));
+                const stockAnnualTotals = (year, rows = stockPortfolioRowsForYear(year)) => {
+                    const totals = sumStockPortfolio(rows);
+                    return { ...totals, totalReturn: stockInputRound(totals.totalReturn + stockRefundTotalForYear(year)) };
+                };
+                const stockPortfolioTotals = computed(() => stockAnnualTotals(selectedYear.value, stockPortfolioRows.value));
+                const stockCumulativeTotals = computed(() => {
+                    let dividends = 0, totalReturn = 0;
+                    for (const year of Object.keys(stockRecords.value)) {
+                        const totals = stockAnnualTotals(Number(year));
+                        dividends += totals.dividends;
+                        totalReturn += totals.totalReturn;
+                    }
+                    return { dividends: stockInputRound(dividends), totalReturn: stockInputRound(totalReturn) };
+                });
+                const stockRefundTotalForYear = year => {
+                    const data = ensureStockYear(year);
+                    return stockInputRound(detailedStockCodes.reduce((sum, code) =>
+                        sum + stockRefundsForRecord(data.stocks[code]).reduce((subtotal, amount) => subtotal + stockInputNumber(amount), 0), 0));
+                };
+                const stockPortfolioRefundTotal = computed(() => stockRefundTotalForYear(selectedYear.value));
+                const stockPortfolioSections = computed(() => [
+                    { year: selectedYear.value, rows: stockPortfolioRows.value, totals: stockPortfolioTotals.value, refund: stockPortfolioRefundTotal.value, previous: false },
+                    { year: selectedYear.value - 1, rows: previousStockPortfolio.value.rows, totals: stockAnnualTotals(selectedYear.value - 1, previousStockPortfolio.value.rows), refund: previousStockPortfolio.value.refund, previous: true }
+                ]);
                 const stockOrderTotals = rows => {
                     const totals = rows.reduce((sum, row) => ({
                         quantity: sum.quantity + stockInputNumber(row.quantity),
@@ -1244,11 +1343,11 @@
                 const stockDividendTotals = computed(() => {
                     const totals = stockDividendRows.value.reduce((sum, row) => ({
                         shares: sum.shares + stockInputNumber(row.shares),
-                        cashDividend: sum.cashDividend + stockInputNumber(row.cashDividend),
+                        cashDividend: sum.cashDividend + stockInputNumber(stockDividendCash(row)),
                         transferFee: sum.transferFee + stockInputNumber(row.transferFee)
                     }), { shares: 0, cashDividend: 0, transferFee: 0 });
                     return { shares: Math.round((totals.shares + Number.EPSILON) * 1000) / 1000,
-                        cashDividend: stockInputRound(totals.cashDividend), transferFee: stockInputRound(totals.transferFee) };
+                        cashDividend: stockCashDividends(activeStockCode.value), transferFee: stockInputRound(totals.transferFee) };
                 });
                 const stockPurchase = row => {
                     if ([row.shares, row.price].some(value => value === null || value === undefined || value === '')) return '';
@@ -1265,9 +1364,43 @@
                     }), { shares: 0, purchase: 0, fee: 0 });
                     return { ...totals, fee: stockInputRound(totals.fee) };
                 };
+                const stockAveragePrice = rows => {
+                    const purchased = rows.filter(row => stockPurchase(row) !== '' && stockInputNumber(row.shares) > 0);
+                    const shares = purchased.reduce((sum, row) => sum + stockInputNumber(row.shares), 0);
+                    return shares > 0 ? stockInputRound(purchased.reduce((sum, row) => sum + stockPurchase(row), 0) / shares) : null;
+                };
+                const stockRegularAveragePrice = computed(() => stockAveragePrice(Object.values(currentStockRecord.value.monthlyRecords).flat()));
                 const stockMonthlyTotals = computed(() => stockMonthTotals(stockMonthlyRows.value));
+                const stockRefundsForRecord = record => Array.from({ length: 12 }, (_, index) => {
+                    const rows = record.monthlyRecords[index + 1];
+                    const count = rows.filter(row => stockInputNumber(row.shares) > 0 && stockInputNumber(row.price) > 0).length;
+                    const hasFee = rows.some(row => row.fee !== null && row.fee !== undefined && row.fee !== '');
+                    if (!count && !hasFee) return null;
+                    return stockInputRound(stockMonthTotals(rows).fee - count);
+                });
+                const stockCostForYear = (year, code) => {
+                    const record = stockRecords.value[year]?.stocks[code];
+                    if (!record) return 0;
+                    if (hasStockValue(record.overview.cost)) return stockInputNumber(record.overview.cost);
+                    const base = stockCostForYear(year - 1, code);
+                    const regular = Object.values(record.monthlyRecords)
+                        .reduce((sum, rows) => {
+                            const totals = stockMonthTotals(rows);
+                            return sum + totals.purchase + totals.fee;
+                        }, 0);
+                    const manual = stockOrderTotals(record.manualRows);
+                    return stockInputRound(base + regular + manual.purchase + manual.fee);
+                };
+                const stockLotsForYear = (year, code) => {
+                    const record = stockRecords.value[year]?.stocks[code];
+                    if (!record) return 0;
+                    if (hasStockValue(record.overview.lots)) return stockInputNumber(record.overview.lots);
+                    const base = stockLotsForYear(year - 1, code);
+                    const regular = Object.values(record.monthlyRecords).reduce((sum, rows) => sum + stockMonthTotals(rows).shares, 0) / 1000;
+                    const manual = stockOrderTotals(record.manualRows).quantity;
+                    return Math.round((base + regular + manual + Number.EPSILON) * 1000) / 1000;
+                };
                 const currentMonthNum = ref(new Date().getMonth() + 1)
-                const selectedYear = ref(new Date().getFullYear())
 
                 const availableYears = computed(() => {
                     const currentY = new Date().getFullYear();
@@ -1279,6 +1412,7 @@
                         }
                     });
                     for (const year of Object.keys(cashflowRecords.value)) if (!years.includes(Number(year))) years.push(Number(year));
+                    for (const year of Object.keys(stockRecords.value)) if (!years.includes(Number(year))) years.push(Number(year));
                     return years.sort((a, b) => a - b);
                 });
 
@@ -1976,7 +2110,7 @@
 
                 return {
                     cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
-                    activeTab, activeStockCode, activeStockView, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockPortfolioRefundTotal, stockDisplayRows, stockManualDisplayRows, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
+                    activeTab, activeStockCode, activeStockView, stockCodes, stockRecords, isStockDerivedField, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockCumulativeTotals, stockPortfolioRefundTotal, stockPortfolioSections, previousStockPortfolio, previousStockYear, stockDisplayRows, stockManualDisplayRows, stockRegularAveragePrice, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDividendCash, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
                     hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,
