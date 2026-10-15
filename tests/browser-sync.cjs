@@ -13,6 +13,11 @@ const {backend}=require('./helpers.cjs');
   const html=fs.readFileSync('index.html','utf8');
   await page.route('**/*',async route=>{
    const req=route.request(),url=req.url();
+   if(url.startsWith('http://skymoneybook.test/js/stocks/')) {
+    const name=new URL(url).pathname.slice(1);
+    if (!['js/stocks/model.js','js/stocks/calculations.js'].includes(name)) return route.abort();
+    return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(name,'utf8')});
+   }
    if(url.includes('/macros/s/')) {
     const data=req.method()==='POST'?api.post(JSON.parse(req.postData())):api.read(new URL(url).searchParams.get('dataset'));
     return route.fulfill({contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify(data)});

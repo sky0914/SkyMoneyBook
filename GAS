@@ -107,7 +107,7 @@ function rows_(ss, name) {
 }
 function read_(ss, key) {
   var timezone = ss.getSpreadsheetTimeZone();
-  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}};
+  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {}};
   if (!key || key === 'transactions') rows_(ss, '明細').forEach(function(r, i) {
     if (!r[0]) return;
     result.transactions.push({id: i + 1, date: date_(r[0], ss, timezone), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
@@ -131,9 +131,11 @@ function read_(ss, key) {
   catch (err) { result.datasetErrors.fundsRecords = String(err); }
   try { if (!key || key === 'cashflowRecords') result.cashflowRecords = readCashflow_(ss); }
   catch (err) { result.datasetErrors.cashflowRecords = String(err); }
+  try { if (!key || key === 'stockRecords') result.stockRecords = readStocks_(ss); }
+  catch (err) { result.datasetErrors.stockRecords = String(err); }
   result.revisions = {};
-  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
-  result.protocolVersion = 6;
+  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
+  result.protocolVersion = 7;
   if (key) {
     var selected = {revisions: result.revisions, datasetErrors: result.datasetErrors, protocolVersion: result.protocolVersion};
     selected[key] = result[key];
@@ -146,7 +148,7 @@ function doGet(e) {
   try {
     lock.waitLock(10000);
     var key = e && e.parameter && e.parameter.dataset;
-    if (key && ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
+    if (key && ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
     return json_(read_(SpreadsheetApp.openById(BOOK_ID), key));
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
@@ -167,6 +169,10 @@ function replaceRows_(ss, name, rows) {
   }
   if (sheet.getMaxRows() < rows.length) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length - sheet.getMaxRows());
   if (sheet.getMaxColumns() < rows[0].length) sheet.insertColumnsAfter(sheet.getMaxColumns(), rows[0].length - sheet.getMaxColumns());
+  if (name === '股票投資記錄') {
+    sheet.getRange(1,2,rows.length,1).setNumberFormat('@');
+    sheet.getRange(1,8,rows.length,1).setNumberFormat('@');
+  }
   // Write one validated batch before removing leftover rows. Keep formatting intact.
   sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
   if (previousRows > rows.length) sheet.getRange(rows.length + 1, 1, previousRows - rows.length, rows[0].length).clearContent();
@@ -175,7 +181,7 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
     var payload = JSON.parse(e.postData.contents);
-    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveCashflow: 'cashflowRecords'};
+    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveCashflow: 'cashflowRecords', saveStocks: 'stockRecords'};
     var key = actions[payload.action];
     if (!key || typeof payload.expectedRevision !== 'string') throw new Error('Unsupported action or missing revision; reload the updated webpage');
     var data = payload[key], rows, name;
@@ -216,6 +222,8 @@ function doPost(e) {
           if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(ym) || !object_(data[ym])) throw new Error('Invalid record month');
           rows.push([ym].concat(ASSET_FIELDS.map(function(field) { return field === 'date' || field === 'note' ? String(data[ym][field] || '') : numeric_(data[ym][field]); })));
         });
+      } else if (key === 'stockRecords') {
+        name = '股票投資記錄'; rows = stockRows_(data);
       } else if (key === 'cashflowRecords') {
         name = '現金流配息記錄'; rows = cashflowRows_(data);
       } else {
@@ -272,6 +280,110 @@ function cashflowRows_(data) {
     Object.keys(record.months).sort(function(a,b) {return Number(a)-Number(b);}).forEach(function(month) {
       if (!/^(?:[1-9]|1[0-2])$/.test(month) || !object_(record.months[month])) throw new Error('Invalid cashflow month');
       rows.push([year,Number(month)].concat(CASHFLOW_FIELDS.slice(0,5).map(function(field) {return cashflowNumber_(record.months[month][field]);})).concat(['','']));
+    });
+  });
+  return rows;
+}
+
+// Each populated input occupies an ordinary spreadsheet row; calculated totals are rebuilt by the UI.
+var STOCK_CODES = ['00878','00919','0056','00982A','0050'];
+var STOCK_HEADERS = ['年份','標的','資料類型','月份','序號','欄位','數值','日期'];
+var STOCK_OVERVIEW_FIELDS = ['cost','marketValue','price','estimatedFee','netValue','lots','estimatedTax','profit','dividends','totalReturn'];
+function emptyStockRecord_() {
+  var record = {overview:{},manualRows:[],monthlyRecords:{},dividends:[]};
+  STOCK_OVERVIEW_FIELDS.forEach(function(f) {record.overview[f]=null;});
+  for (var i=0;i<12;i++) record.manualRows.push({date:'',quantity:null,purchase:null,fee:null,price:null});
+  for (var m=1;m<=12;m++) {
+    record.monthlyRecords[m]=[];
+    for (var j=0;j<15;j++) record.monthlyRecords[m].push({date:'',shares:null,fee:null,price:null});
+  }
+  for (var d=0;d<4;d++) record.dividends.push({exDate:'',payDate:'',shares:null,perShare:null,transferFee:null});
+  return record;
+}
+function stockBlank_(v) {return v===null || v===undefined || v==='';}
+function stockDate_(v, year, ss) {
+  if (stockBlank_(v)) return '';
+  var text = v instanceof Date ? date_(v,ss) : String(v).trim();
+  var match=text.match(/^(?:(\d{4})-)?(\d{1,2})[-/](\d{1,2})$/);
+  if (!match || (match[1] && match[1]!==year)) throw new Error('股票日期格式無效或年份不符');
+  var month=Number(match[2]),day=Number(match[3]);
+  if (month<1 || month>12 || day<1 || day>new Date(Number(year),month,0).getDate()) throw new Error('股票日期不存在');
+  return month+'/'+day;
+}
+function stockValue_(value, field, year, ss) {
+  if (['date','exDate','payDate'].indexOf(field)>=0) return stockDate_(value,year,ss);
+  if (stockBlank_(value)) return null;
+  if (typeof value==='string' && !value.trim()) throw new Error('股票數值無效');
+  var n=numeric_(value);
+  if (n<0 && ['profit','totalReturn'].indexOf(field)<0) throw new Error('股票數值不得為負數');
+  return n;
+}
+function stockRowTarget_(record,type,month,index) {
+  if (type==='overview' && month===0 && index===0) return record.overview;
+  if (type==='monthlyRecords' && month>=1 && month<=12 && index>=1 && index<=15) return record.monthlyRecords[month][index-1];
+  if (month===0 && type==='manualRows' && index>=1 && index<=12) return record.manualRows[index-1];
+  if (month===0 && type==='dividends' && index>=1 && index<=4) return record.dividends[index-1];
+  throw new Error('股票資料類型、月份或序號無效');
+}
+function readStocks_(ss) {
+  var result={},sheet=ss.getSheetByName('股票投資記錄');
+  if (!sheet) return result;
+  var values=sheet.getDataRange().getValues(),seen={},template=emptyStockRecord_();
+  if (sheet.getLastRow() && canonical_(values[0].slice(0,STOCK_HEADERS.length))!==canonical_(STOCK_HEADERS)) throw new Error('股票工作表欄位不符，已停止讀寫，請保留原資料');
+  values.slice(1).forEach(function(r) {
+    if (r.every(stockBlank_)) return;
+    var year=String(r[0]),code=String(r[1]),type=String(r[2]),month=Number(r[3]),index=Number(r[4]),field=String(r[5]);
+    if (!/^[1-9]\d{3}$/.test(year) || STOCK_CODES.indexOf(code)<0 || !Number.isInteger(month) || !Number.isInteger(index)) throw new Error('股票年份、標的或序號無效');
+    var target=stockRowTarget_(template,type,month,index);
+    if (!Object.prototype.hasOwnProperty.call(target,field)) throw new Error('未知股票欄位');
+    var isDate=typeof target[field]==='string';
+    if (!stockBlank_(r[isDate?6:7])) throw new Error('股票數值與日期欄位不符');
+    var value=stockValue_(r[isDate?7:6],field,year,ss);
+    var id=[year,code,type,month,index,field].join('|');
+    if (seen[id]) throw new Error('股票欄位重複');
+    seen[id]=true;
+    if (stockBlank_(value)) return;
+    if (!result[year]) {
+      result[year]={stocks:{}};
+      STOCK_CODES.forEach(function(c) {result[year].stocks[c]=emptyStockRecord_();});
+    }
+    stockRowTarget_(result[year].stocks[code],type,month,index)[field]=value;
+  });
+  return result;
+}
+function stockRows_(data) {
+  var rows=[STOCK_HEADERS.slice()];
+  Object.keys(data).sort().forEach(function(year) {
+    var annual=data[year];
+    if (!/^[1-9]\d{3}$/.test(year) || !object_(annual) || !object_(annual.stocks) || Object.keys(annual).some(function(k){return k!=='stocks';})) throw new Error('股票年度資料無效');
+    Object.keys(annual.stocks).forEach(function(code) {
+      if (STOCK_CODES.indexOf(code)<0) throw new Error('未知股票標的');
+      var record=annual.stocks[code],template=emptyStockRecord_();
+      if (!object_(record) || Object.keys(record).some(function(k){return !Object.prototype.hasOwnProperty.call(template,k);})) throw new Error('股票資料無效');
+      function append(source,target,type,month,index) {
+        if (!object_(source)) throw new Error('股票資料列無效');
+        Object.keys(source).forEach(function(field) {
+          if (!Object.prototype.hasOwnProperty.call(target,field)) throw new Error('未知股票輸入欄位');
+          var value=stockValue_(source[field],field,year);
+          if (stockBlank_(value)) return;
+          var date=typeof target[field]==='string';
+          rows.push([year,code,type,month,index,field,date?'':value,date?value:'']);
+        });
+      }
+      if (record.overview!==undefined) append(record.overview,template.overview,'overview',0,0);
+      ['manualRows','dividends'].forEach(function(type) {
+        if (record[type]===undefined) return;
+        if (!Array.isArray(record[type]) || record[type].length>template[type].length) throw new Error('股票資料列數量無效');
+        record[type].forEach(function(row,i){append(row,template[type][i],type,0,i+1);});
+      });
+      if (record.monthlyRecords!==undefined) {
+        if (!object_(record.monthlyRecords)) throw new Error('股票月份無效');
+        Object.keys(record.monthlyRecords).forEach(function(m) {
+          var source=record.monthlyRecords[m];
+          if (!/^(?:[1-9]|1[0-2])$/.test(m) || !Array.isArray(source) || source.length>15) throw new Error('股票月份或列數無效');
+          source.forEach(function(row,i){append(row,template.monthlyRecords[m][i],'monthlyRecords',Number(m),i+1);});
+        });
+      }
     });
   });
   return rows;

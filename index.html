@@ -93,6 +93,18 @@
         .ledger-theme .cashflow-table tbody td:has(input), .ledger-theme .cashflow-table tfoot td:has(input) { padding: 0; }
         .ledger-theme .cashflow-table th:first-child { width: 80px; white-space: nowrap; }
         .ledger-theme .cashflow-table input { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; min-height: 28px; text-align: center; }
+        .ledger-theme .stock-save-toolbar {
+            position: sticky;
+            top: calc(env(safe-area-inset-top, 0px) + 8px);
+            z-index: 20;
+            padding: 12px;
+            background: #ffffff;
+            border: 1px solid #d6dfd0;
+            border-radius: 12px;
+            box-shadow: 0 4px 14px #25352b12;
+        }
+        .ledger-theme .stock-save-toolbar p { flex: 1 1 160px; }
+        .ledger-theme .stock-save-toolbar button { flex-shrink: 0; min-height: 44px; }
         .ledger-theme .stocks-layout { display: grid; grid-template-columns: minmax(0, 35fr) minmax(0, 48fr) minmax(0, 17fr); gap: 16px; align-items: start; }
         .ledger-theme .stocks-left, .ledger-theme .stocks-monthly, .ledger-theme .stocks-refunds { min-width: 0; }
         .ledger-theme .stock-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 20px; }
@@ -350,6 +362,11 @@
 
         <!-- ================= 頁籤：股票 ================= -->
         <section v-show="activeTab === 'stocks'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
+            <div class="stock-save-toolbar flex flex-wrap items-center justify-between gap-3 mb-4" role="group" aria-label="股票儲存操作">
+                <p class="text-xs text-gray-400">一次儲存全部股票與年度，包含前一年結算資料。<span v-if="dirtySectionNames.includes('股票投資')" class="text-amber-300">有尚未儲存的修改</span></p>
+                <button @click="saveStocksRecord" :disabled="isSubmitting || !stocksReady" class="primary-action px-4 py-2 rounded-xl text-sm disabled:opacity-40">{{ isSubmitting ? '同步中…' : '儲存股票資料' }}</button>
+            </div>
+            <p v-if="!stocksReady" role="status" class="text-sm text-amber-300 mb-4">股票雲端儲存尚未啟用，請部署新版 GAS 後重新載入。未儲存的內容請保留在此頁面。</p>
             <nav class="flex flex-wrap gap-2 mb-4" aria-label="股票代碼">
                 <button @click="activeStockView = 'overview'" :aria-current="activeStockView === 'overview' ? 'page' : null" :class="activeStockView === 'overview' ? 'tab-active' : 'tab-idle'" class="px-4 py-2 rounded-xl text-sm font-medium transition border cursor-pointer">總覽</button>
                 <button v-for="code in stockCodes" :key="code" @click="activeStockCode = code; activeStockView = 'detail'" :aria-current="activeStockView === 'detail' && activeStockCode === code ? 'page' : null" :class="activeStockView === 'detail' && activeStockCode === code ? 'tab-active' : 'tab-idle'" class="px-4 py-2 rounded-xl text-sm font-medium transition border cursor-pointer">{{ code }}</button>
@@ -379,7 +396,7 @@
                         <tbody>
                             <tr v-for="row in portfolio.rows" :key="row.code">
                                 <th scope="row" class="border border-borderCol font-normal">{{ row.code }}</th>
-                                <td v-for="field in stockPortfolioFields" :key="field.key" class="border border-borderCol font-mono"><input type="number" v-model.number="row.overview[field.key]" :readonly="!portfolio.previous && isStockDerivedField(row.code, field.key)" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" :aria-label="portfolio.year + ' 年 ' + row.code + ' 總覽' + field.label" placeholder="—" class="text-center"></td>
+                                <td v-for="field in stockPortfolioFields" :key="field.key" class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" v-model.number="row.overview[field.key]" :readonly="!portfolio.previous && isStockDerivedField(row.code, field.key)" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" :aria-label="portfolio.year + ' 年 ' + row.code + ' 總覽' + field.label" placeholder="—" class="text-center"></td>
                             </tr>
                         </tbody>
                         <tfoot>
@@ -402,7 +419,7 @@
                     <tbody>
                         <tr v-for="field in group" :key="field.key" :class="field.key === 'profit' ? 'overview-profit' : field.key === 'totalReturn' ? 'overview-total' : ''">
                             <th scope="row"><label :for="'stock-overview-' + field.key">{{ field.label }}</label></th>
-                            <td><input :id="'stock-overview-' + field.key" type="number" :readonly="isStockDerivedField(activeStockCode, field.key)" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" v-model.number="stockOverview[field.key]" placeholder="—" :aria-label="activeStockCode + ' ' + field.label"></td>
+                            <td><input :disabled="isSubmitting" :id="'stock-overview-' + field.key" type="number" :readonly="isStockDerivedField(activeStockCode, field.key)" :min="field.signed ? undefined : 0" :step="field.step || '0.01'" v-model.number="stockOverview[field.key]" placeholder="—" :aria-label="activeStockCode + ' ' + field.label"></td>
                         </tr>
                         <tr v-if="group.length < 3" aria-hidden="true"><td colspan="2">&nbsp;</td></tr>
                     </tbody>
@@ -442,11 +459,11 @@
                         <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">時間</th><th scope="col" class="border border-borderCol">購入數量</th><th scope="col" class="border border-borderCol">購入價格</th><th scope="col" class="border border-borderCol">手續費</th><th scope="col" class="border border-borderCol">股價</th></tr></thead>
                         <tbody>
                             <tr v-for="(row, index) in stockManualDisplayRows" :key="index">
-                                <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.date ? '' : 'text-gray-400'">{{ stockDateDisplay(row.date) || '月/日' }}</span><input type="date" :value="stockDateInputValue(row.date)" @input="row.date = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆時間'" class="text-center"></div></td>
-                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.001" v-model.number="row.quantity" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆購入數量'" placeholder="—" class="text-center"></td>
-                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.purchase" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆購入價格'" placeholder="—" class="text-center"></td>
-                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.fee" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆手續費'" placeholder="—" class="text-center"></td>
-                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.price" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆股價'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.date ? '' : 'text-gray-400'">{{ stockDateDisplay(row.date) || '月/日' }}</span><input :disabled="isSubmitting" type="date" :value="stockDateInputValue(row.date)" @input="row.date = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆時間'" class="text-center"></div></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.001" v-model.number="row.quantity" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆購入數量'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.01" v-model.number="row.purchase" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆購入價格'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.01" v-model.number="row.fee" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆手續費'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.01" v-model.number="row.price" :aria-label="activeStockCode + ' 手動下單第 ' + (index + 1) + ' 筆股價'" placeholder="—" class="text-center"></td>
                             </tr>
                         </tbody>
                         <tfoot><tr class="bg-darkBg font-semibold">
@@ -477,11 +494,11 @@
                         <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">時間</th><th scope="col" class="border border-borderCol">股數</th><th scope="col" class="border border-borderCol">購入價格</th><th scope="col" class="border border-borderCol">手續費</th><th scope="col" class="border border-borderCol">單價</th></tr></thead>
                         <tbody>
                             <tr v-for="(row, index) in stockMonthlyRows" :key="index">
-                                <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.date ? '' : 'text-gray-400'">{{ stockDateDisplay(row.date) || '月/日' }}</span><input type="date" :value="stockDateInputValue(row.date)" @input="row.date = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆時間'" class="text-center"></div></td>
-                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="1" v-model.number="row.shares" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆股數'" placeholder="—" class="text-center"></td>
-                                <td class="border border-borderCol font-mono"><input type="number" readonly :value="stockPurchase(row)" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆購入價格'" placeholder="—" title="自動計算：INT(股數 × 單價)" class="text-center"></td>
-                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.fee" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆手續費'" placeholder="—" class="text-center"></td>
-                                <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.price" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆單價'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.date ? '' : 'text-gray-400'">{{ stockDateDisplay(row.date) || '月/日' }}</span><input :disabled="isSubmitting" type="date" :value="stockDateInputValue(row.date)" @input="row.date = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆時間'" class="text-center"></div></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="1" v-model.number="row.shares" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆股數'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" readonly :value="stockPurchase(row)" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆購入價格'" placeholder="—" title="自動計算：INT(股數 × 單價)" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.01" v-model.number="row.fee" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆手續費'" placeholder="—" class="text-center"></td>
+                                <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.01" v-model.number="row.price" :aria-label="selectedStockMonth + ' 月第 ' + (index + 1) + ' 筆單價'" placeholder="—" class="text-center"></td>
                             </tr>
                         </tbody>
                         <tfoot><tr class="bg-darkBg font-semibold">
@@ -500,12 +517,12 @@
                             <thead><tr class="bg-darkBg"><th scope="col" class="border border-borderCol">除息日</th><th scope="col" class="border border-borderCol">發放日</th><th scope="col" class="border border-borderCol">股數</th><th scope="col" class="border border-borderCol">每股利息</th><th scope="col" class="border border-borderCol">現金股利</th><th scope="col" class="border border-borderCol">轉帳手續</th></tr></thead>
                             <tbody>
                                 <tr v-for="(row, index) in stockDividendRows" :key="index">
-                                    <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.exDate ? '' : 'text-gray-400'">{{ stockDateDisplay(row.exDate) || '月/日' }}</span><input type="date" :value="stockDateInputValue(row.exDate)" @input="row.exDate = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆除息日'"></div></td>
-                                    <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.payDate ? '' : 'text-gray-400'">{{ stockDateDisplay(row.payDate) || '月/日' }}</span><input type="date" :value="stockDateInputValue(row.payDate)" @input="row.payDate = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆發放日'"></div></td>
-                                    <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.001" v-model.number="row.shares" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆股數'" placeholder="—" class="text-center"></td>
-                                    <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.0001" v-model.number="row.perShare" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆每股利息'" placeholder="—" class="text-center"></td>
-                                    <td class="border border-borderCol font-mono"><input type="number" readonly step="any" :value="stockDividendCash(row)" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆現金股利'" placeholder="—" title="自動計算：股數 × 每股利息 × 1,000" class="text-center"></td>
-                                    <td class="border border-borderCol font-mono"><input type="number" min="0" step="0.01" v-model.number="row.transferFee" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆轉帳手續'" placeholder="—" class="text-center"></td>
+                                    <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.exDate ? '' : 'text-gray-400'">{{ stockDateDisplay(row.exDate) || '月/日' }}</span><input :disabled="isSubmitting" type="date" :value="stockDateInputValue(row.exDate)" @input="row.exDate = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆除息日'"></div></td>
+                                    <td class="border border-borderCol"><div class="stock-date-field"><span aria-hidden="true" :class="row.payDate ? '' : 'text-gray-400'">{{ stockDateDisplay(row.payDate) || '月/日' }}</span><input :disabled="isSubmitting" type="date" :value="stockDateInputValue(row.payDate)" @input="row.payDate = stockDateDisplay($event.target.value)" @click="openStockDatePicker" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆發放日'"></div></td>
+                                    <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.001" v-model.number="row.shares" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆股數'" placeholder="—" class="text-center"></td>
+                                    <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.0001" v-model.number="row.perShare" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆每股利息'" placeholder="—" class="text-center"></td>
+                                    <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" readonly step="any" :value="stockDividendCash(row)" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆現金股利'" placeholder="—" title="自動計算：股數 × 每股利息 × 1,000" class="text-center"></td>
+                                    <td class="border border-borderCol font-mono"><input :disabled="isSubmitting" type="number" min="0" step="0.01" v-model.number="row.transferFee" :aria-label="activeStockCode + ' 配息第 ' + (index + 1) + ' 筆轉帳手續'" placeholder="—" class="text-center"></td>
                                 </tr>
                             </tbody>
                             <tfoot><tr class="bg-darkBg font-semibold">
@@ -1156,6 +1173,9 @@
         [v-cloak] { display: none; }
     </style>
 
+    <script src="js/stocks/model.js"></script>
+    <script src="js/stocks/calculations.js"></script>
+
     <!-- ================= Vue.js 前端邏輯 ================= -->
     <script>
         const { createApp, ref, computed, onMounted, watch } = Vue
@@ -1167,9 +1187,6 @@
                 const activeTab = ref('transactions')
                 const selectedYear = ref(new Date().getFullYear())
                 const currentStockMonth = () => Number(new Intl.DateTimeFormat('en-US', { month: 'numeric', timeZone: 'Asia/Taipei' }).format(new Date()));
-                const emptyStockMonths = () => Object.fromEntries(Array.from({ length: 12 }, (_, index) => [index + 1,
-                    Array.from({ length: 15 }, () => ({ date: '', shares: null, fee: null, price: null }))
-                ]));
                 const activeStockCode = ref('00878');
                 const activeStockView = ref('overview');
                 const stockOverviewGroups = [
@@ -1178,37 +1195,23 @@
                     [{ key: 'estimatedTax', label: '預估交易稅' }, { key: 'profit', label: '投資損益', signed: true }],
                     [{ key: 'dividends', label: '配息' }, { key: 'totalReturn', label: '總收益', signed: true }]
                 ];
-                const stockCodes = ['00878', '00919', '0056', '00982A', '0050'];
-                const detailedStockCodes = stockCodes;
-                const hasStockValue = value => value !== null && value !== undefined && value !== '';
-                const emptyStockRecord = () => ({
-                    overview: Object.fromEntries(stockOverviewGroups.flat().map(field => [field.key, null])),
-                    manualRows: Array.from({ length: 12 }, () => ({ date: '', quantity: null, purchase: null, fee: null, price: null })),
-                    monthlyRecords: emptyStockMonths(),
-                    dividends: Array.from({ length: 4 }, () => ({ exDate: '', payDate: '', shares: null, perShare: null, transferFee: null }))
-                });
-                // Canonical source: year -> stocks -> code -> inputs. Derived totals are not stored.
+                const {stockCodes, emptyStockYear, stockSnapshot, validateStockInputs, isStockDerivedField} = StockModel;
                 const stockRecords = ref({});
-                const ensureStockYear = year => stockRecords.value[year] ||= {
-                    stocks: Object.fromEntries(stockCodes.map(code => [code, emptyStockRecord()]))
+                const stockCalculations = StockCalculations.createStockCalculations(() => stockRecords.value);
+                const {stockPurchase, stockDividendCash, stockMonthTotals, stockOrderTotals, stockAveragePrice,
+                    stockRefundsForRecord, stockAnnualTotals, stockRefundTotalForYear} = stockCalculations;
+                const stocksReady = ref(false);
+                const saveStocksRecord = () => {
+                    if (!stocksReady.value) {syncError.value='請先部署新版 GAS 並重新載入，才能儲存股票資料。';return false;}
+                    try {validateStockInputs(stockSnapshot(stockRecords.value));}
+                    catch (err) {syncError.value=err.message;return false;}
+                    return saveCloud('saveStocks','stockRecords',stockRecords.value,'全部股票與年度資料已確認儲存');
                 };
+                const ensureStockYear = year => stockRecords.value[year] ||= emptyStockYear();
                 const stockRecordForYear = (year, code) => ensureStockYear(year).stocks[code];
                 const currentStockRecord = computed(() => stockRecordForYear(selectedYear.value, activeStockCode.value));
-                const isStockDerivedField = (code, key) => key === 'marketValue' ||
-                    (detailedStockCodes.includes(code) && ['lots', 'cost', 'netValue', 'profit', 'dividends', 'totalReturn'].includes(key));
                 const stockOverviewForCode = (code, year, historical = false) => new Proxy(stockRecordForYear(year, code).overview, {
-                    get: (target, key) => {
-                        // Manually entered annual closing values are shared with that year's main view.
-                        if (isStockDerivedField(code, key) && hasStockValue(target[key])) return Reflect.get(target, key);
-                        if (key === 'marketValue') return stockMarketValue(target, code, year);
-                        if (detailedStockCodes.includes(code) && key === 'lots') return stockLotsForYear(year, code);
-                        if (detailedStockCodes.includes(code) && key === 'netValue') return stockNetValue(target, code, year);
-                        if (detailedStockCodes.includes(code) && key === 'profit') return stockInvestmentProfit(code, target, year);
-                        if (detailedStockCodes.includes(code) && key === 'dividends') return stockNetDividends(code, year);
-                        if (detailedStockCodes.includes(code) && key === 'totalReturn') return stockTotalReturn(code, target, year);
-                        if (detailedStockCodes.includes(code) && key === 'cost') return stockCostForYear(year, code);
-                        return Reflect.get(target, key);
-                    },
+                    get: (target, key) => stockCalculations.stockOverviewValue(year, code, key),
                     set: (target, key, value) => !historical && isStockDerivedField(code, key) ? true : Reflect.set(target, key, value)
                 });
                 const stockOverview = computed(() => stockOverviewForCode(activeStockCode.value, selectedYear.value));
@@ -1227,19 +1230,7 @@
                     rows: stockPortfolioRowsForYear(selectedYear.value - 1, true),
                     refund: stockRefundTotalForYear(selectedYear.value - 1)
                 }));
-                const stockDisplayRows = computed(() => Array.from({ length: 12 }, (_, index) => {
-                    const month = index + 1;
-                    const rows = currentStockRecord.value.monthlyRecords[month];
-                    const totals = stockMonthTotals(rows);
-                    const hasValue = value => value !== null && value !== undefined && value !== '';
-                    return {
-                        month,
-                        quantity: rows.some(row => hasValue(row.shares)) ? totals.shares / 1000 : null,
-                        purchase: rows.some(row => stockPurchase(row) !== '') ? totals.purchase : null,
-                        fee: rows.some(row => hasValue(row.fee)) ? totals.fee : null,
-                        averagePrice: stockAveragePrice(rows)
-                    };
-                }));
+                const stockDisplayRows = computed(() => stockCalculations.stockAnnualRows(currentStockRecord.value));
                 const stockManualDisplayRows = computed(() => currentStockRecord.value.manualRows);
                 const stockRefundAmounts = computed(() => stockRefundsForRecord(currentStockRecord.value));
                 const stockDividendRows = computed(() => currentStockRecord.value.dividends);
@@ -1268,138 +1259,18 @@
                         try { event.target.showPicker(); } catch { /* Keep the browser's normal date control usable. */ }
                     }
                 };
-                const stockInputNumber = value => Number.isFinite(Number(value)) ? Number(value) : 0;
-                const stockInputRound = value => Math.round((value + Number.EPSILON) * 100) / 100;
-                const stockDividendCash = row => {
-                    if ([row.shares, row.perShare].some(value => value === null || value === undefined || value === '')) return '';
-                    const value = Number(row.shares) * Number(row.perShare) * 1000;
-                    return Number.isFinite(value) ? Number(value.toPrecision(15)) : '';
-                };
-                const stockCashDividends = (code, year = selectedYear.value) => Number(stockRecordForYear(year, code).dividends.reduce((sum, row) =>
-                    sum + stockInputNumber(stockDividendCash(row)), 0).toPrecision(15));
-                const stockNetDividends = (code, year = selectedYear.value) => {
-                    const fees = stockRecordForYear(year, code).dividends.reduce((sum, row) => sum + stockInputNumber(row.transferFee), 0);
-                    return Number((stockCashDividends(code, year) - stockInputRound(fees)).toPrecision(15));
-                };
-                const stockMarketValue = (overview, code, year) => {
-                    const lots = stockLotsForYear(year, code);
-                    if (!hasStockValue(overview.price)) return null;
-                    const value = Number(overview.price) * lots * 1000;
-                    return Number.isFinite(value) ? Math.trunc(Number(value.toPrecision(15))) : null;
-                };
-                const stockNetValue = (overview, code, year) => {
-                    const marketValue = stockMarketValue(overview, code, year);
-                    return marketValue === null ? null : stockInputRound(marketValue - stockInputNumber(overview.estimatedFee) - stockInputNumber(overview.estimatedTax));
-                };
-                const stockInvestmentProfit = (code, overview, year) => {
-                    const netValue = hasStockValue(overview.netValue) ? stockInputNumber(overview.netValue) : stockNetValue(overview, code, year);
-                    const cost = detailedStockCodes.includes(code) ? stockCostForYear(year, code) : overview.cost;
-                    if (netValue === null || cost === null || cost === undefined || cost === '') return null;
-                    return stockInputRound(netValue - stockInputNumber(cost));
-                };
-                const stockTotalReturn = (code, overview, year) => {
-                    const profit = hasStockValue(overview.profit) ? stockInputNumber(overview.profit) : stockInvestmentProfit(code, overview, year);
-                    if (profit === null) return null;
-                    const dividends = hasStockValue(overview.dividends) ? stockInputNumber(overview.dividends) : stockNetDividends(code, year);
-                    return stockInputRound(profit + dividends);
-                };
-                const sumStockPortfolio = rows => Object.fromEntries(['cost', 'netValue', 'profit', 'dividends', 'totalReturn'].map(key =>
-                    [key, stockInputRound(rows.reduce((sum, row) => sum + stockInputNumber(row.overview[key]), 0))]));
-                const stockAnnualTotals = (year, rows = stockPortfolioRowsForYear(year)) => {
-                    const totals = sumStockPortfolio(rows);
-                    return { ...totals, totalReturn: stockInputRound(totals.totalReturn + stockRefundTotalForYear(year)) };
-                };
                 const stockPortfolioTotals = computed(() => stockAnnualTotals(selectedYear.value, stockPortfolioRows.value));
-                const stockCumulativeTotals = computed(() => {
-                    let dividends = 0, totalReturn = 0;
-                    for (const year of Object.keys(stockRecords.value)) {
-                        const totals = stockAnnualTotals(Number(year));
-                        dividends += totals.dividends;
-                        totalReturn += totals.totalReturn;
-                    }
-                    return { dividends: stockInputRound(dividends), totalReturn: stockInputRound(totalReturn) };
-                });
-                const stockRefundTotalForYear = year => {
-                    const data = ensureStockYear(year);
-                    return stockInputRound(detailedStockCodes.reduce((sum, code) =>
-                        sum + stockRefundsForRecord(data.stocks[code]).reduce((subtotal, amount) => subtotal + stockInputNumber(amount), 0), 0));
-                };
+                const stockCumulativeTotals = computed(() => stockCalculations.stockCumulativeTotals());
                 const stockPortfolioRefundTotal = computed(() => stockRefundTotalForYear(selectedYear.value));
                 const stockPortfolioSections = computed(() => [
                     { year: selectedYear.value, rows: stockPortfolioRows.value, totals: stockPortfolioTotals.value, refund: stockPortfolioRefundTotal.value, previous: false },
                     { year: selectedYear.value - 1, rows: previousStockPortfolio.value.rows, totals: stockAnnualTotals(selectedYear.value - 1, previousStockPortfolio.value.rows), refund: previousStockPortfolio.value.refund, previous: true }
                 ]);
-                const stockOrderTotals = rows => {
-                    const totals = rows.reduce((sum, row) => ({
-                        quantity: sum.quantity + stockInputNumber(row.quantity),
-                        purchase: sum.purchase + stockInputNumber(row.purchase),
-                        fee: sum.fee + stockInputNumber(row.fee)
-                    }), { quantity: 0, purchase: 0, fee: 0 });
-                    return { quantity: Math.round((totals.quantity + Number.EPSILON) * 1000) / 1000,
-                        purchase: stockInputRound(totals.purchase), fee: stockInputRound(totals.fee) };
-                };
                 const stockRegularTotals = computed(() => stockOrderTotals(stockDisplayRows.value));
                 const stockManualTotals = computed(() => stockOrderTotals(stockManualDisplayRows.value));
-                const stockDividendTotals = computed(() => {
-                    const totals = stockDividendRows.value.reduce((sum, row) => ({
-                        shares: sum.shares + stockInputNumber(row.shares),
-                        cashDividend: sum.cashDividend + stockInputNumber(stockDividendCash(row)),
-                        transferFee: sum.transferFee + stockInputNumber(row.transferFee)
-                    }), { shares: 0, cashDividend: 0, transferFee: 0 });
-                    return { shares: Math.round((totals.shares + Number.EPSILON) * 1000) / 1000,
-                        cashDividend: stockCashDividends(activeStockCode.value), transferFee: stockInputRound(totals.transferFee) };
-                });
-                const stockPurchase = row => {
-                    if ([row.shares, row.price].some(value => value === null || value === undefined || value === '')) return '';
-                    const product = Number(row.shares) * Number(row.price);
-                    if (!Number.isFinite(product)) return '';
-                    // Remove binary floating-point noise before applying INT (floor).
-                    return Math.floor(Number(product.toPrecision(15)));
-                };
-                const stockMonthTotals = rows => {
-                    const totals = rows.reduce((total, row) => ({
-                        shares: total.shares + stockInputNumber(row.shares),
-                        purchase: total.purchase + stockInputNumber(stockPurchase(row)),
-                        fee: total.fee + stockInputNumber(row.fee)
-                    }), { shares: 0, purchase: 0, fee: 0 });
-                    return { ...totals, fee: stockInputRound(totals.fee) };
-                };
-                const stockAveragePrice = rows => {
-                    const purchased = rows.filter(row => stockPurchase(row) !== '' && stockInputNumber(row.shares) > 0);
-                    const shares = purchased.reduce((sum, row) => sum + stockInputNumber(row.shares), 0);
-                    return shares > 0 ? stockInputRound(purchased.reduce((sum, row) => sum + stockPurchase(row), 0) / shares) : null;
-                };
+                const stockDividendTotals = computed(() => stockCalculations.stockDividendTotals(activeStockCode.value, selectedYear.value));
                 const stockRegularAveragePrice = computed(() => stockAveragePrice(Object.values(currentStockRecord.value.monthlyRecords).flat()));
                 const stockMonthlyTotals = computed(() => stockMonthTotals(stockMonthlyRows.value));
-                const stockRefundsForRecord = record => Array.from({ length: 12 }, (_, index) => {
-                    const rows = record.monthlyRecords[index + 1];
-                    const count = rows.filter(row => stockInputNumber(row.shares) > 0 && stockInputNumber(row.price) > 0).length;
-                    const hasFee = rows.some(row => row.fee !== null && row.fee !== undefined && row.fee !== '');
-                    if (!count && !hasFee) return null;
-                    return stockInputRound(stockMonthTotals(rows).fee - count);
-                });
-                const stockCostForYear = (year, code) => {
-                    const record = stockRecords.value[year]?.stocks[code];
-                    if (!record) return 0;
-                    if (hasStockValue(record.overview.cost)) return stockInputNumber(record.overview.cost);
-                    const base = stockCostForYear(year - 1, code);
-                    const regular = Object.values(record.monthlyRecords)
-                        .reduce((sum, rows) => {
-                            const totals = stockMonthTotals(rows);
-                            return sum + totals.purchase + totals.fee;
-                        }, 0);
-                    const manual = stockOrderTotals(record.manualRows);
-                    return stockInputRound(base + regular + manual.purchase + manual.fee);
-                };
-                const stockLotsForYear = (year, code) => {
-                    const record = stockRecords.value[year]?.stocks[code];
-                    if (!record) return 0;
-                    if (hasStockValue(record.overview.lots)) return stockInputNumber(record.overview.lots);
-                    const base = stockLotsForYear(year - 1, code);
-                    const regular = Object.values(record.monthlyRecords).reduce((sum, rows) => sum + stockMonthTotals(rows).shares, 0) / 1000;
-                    const manual = stockOrderTotals(record.manualRows).quantity;
-                    return Math.round((base + regular + manual + Number.EPSILON) * 1000) / 1000;
-                };
                 const currentMonthNum = ref(new Date().getMonth() + 1)
 
                 const availableYears = computed(() => {
@@ -1421,7 +1292,7 @@
                 const syncError = ref('');
                 const pendingSave = ref(null);
                 let remoteSnapshot = null;
-                const cleanData = ref({ transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {} });
+                const cleanData = ref({ transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {} });
                 let toastTimer;
                 const clone = value => JSON.parse(JSON.stringify(value));
                 // Automatic blank rows are clean defaults, not edits. Preserve existing baselines.
@@ -1432,7 +1303,7 @@
                 };
                 const canonical = value => JSON.stringify(normalize(value));
                 // 明細維持原本五欄，列號只供目前畫面編輯，不是儲存資料的一部分。
-                const sameDataset = (key, a, b) => canonical(key === 'transactions' ? a.map(({ id, ...row }) => row) : a) ===
+                const sameDataset = (key, a, b) => key === 'stockRecords' ? canonical(stockSnapshot(a)) === canonical(stockSnapshot(b)) : canonical(key === 'transactions' ? a.map(({ id, ...row }) => row) : a) ===
                     canonical(key === 'transactions' ? b.map(({ id, ...row }) => row) : b);
                 const normalize = value => Array.isArray(value) ? value.map(normalize) :
                     value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])])) : value;
@@ -1447,8 +1318,8 @@
                     const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' }, url);
                     if (!res.ok) throw new Error('雲端讀取失敗（HTTP ' + res.status + '）');
                     const data = await res.json();
-                    const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords', ...(data.protocolVersion >= 6 ? ['cashflowRecords'] : [])];
-                    if (!data || ![3, 4, 6].includes(data.protocolVersion) || !data.revisions ||
+                    const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords', ...(data?.protocolVersion >= 6 ? ['cashflowRecords'] : []), ...(data?.protocolVersion >= 7 ? ['stockRecords'] : [])];
+                    if (!data || ![3, 4, 6, 7].includes(data.protocolVersion) || !data.revisions ||
                         !keys.every(field => typeof data.revisions[field] === 'string' &&
                             (field === 'transactions' ? Array.isArray(data[field]) :
                                 data[field] && typeof data[field] === 'object' && !Array.isArray(data[field])))) {
@@ -1828,8 +1699,9 @@
                 }, { deep: true });
 
                 const datasetRefs = () => ({ transactions: transactions.value, summaries: allSummaries.value,
-                    assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value });
+                    assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value, stockRecords: stockRecords.value });
                 const editableSnapshot = (key, value) => {
+                    if (key === 'stockRecords') return stockSnapshot(value);
                     const strip = data => {
                         if (Array.isArray(data)) return data.map(strip);
                         if (!data || typeof data !== 'object') return data;
@@ -1853,7 +1725,7 @@
                     canonical(editableSnapshot(key, datasetRefs()[key])) !== canonical(editableSnapshot(key, cleanData.value[key])))]));
                 const hasUnsavedFunds = computed(() => datasetDirty.fundsRecords.value);
                 const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
-                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息' };
+                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息', stockRecords: '股票投資' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
                 const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value);
 
@@ -1866,6 +1738,10 @@
                     syncStatus.value = '正在讀取雲端資料';
                     try {
                         const data = await readCloud();
+                        const incomingStocks = data.protocolVersion >= 7 && !data.datasetErrors?.stockRecords ? stockSnapshot(data.stockRecords) : null;
+                        if (incomingStocks) validateStockInputs(incomingStocks);
+                        stocksReady.value = incomingStocks !== null;
+                        if (stocksReady.value) stockRecords.value = incomingStocks;
                         transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
                         allSummaries.value = clone(data.summaries);
                         assetsRecords.value = clone(data.assetsRecords);
@@ -1885,9 +1761,10 @@
                             }
                         }
                         const current = datasetRefs();
-                        for (const key in current) if (!data.datasetErrors?.[key]) cleanData.value[key] = clone(current[key]);
+                        for (const key in current) if (!data.datasetErrors?.[key] && (key !== 'stockRecords' || stocksReady.value)) cleanData.value[key] = clone(current[key]);
                         showModal.value = false;
                         syncStatus.value = '雲端資料讀取完成';
+                        if (data.datasetErrors?.stockRecords) syncError.value = '股票資料讀取失敗：' + data.datasetErrors.stockRecords;
                         if (data.datasetErrors?.cashflowRecords) syncError.value = '配息資料讀取失敗：' + data.datasetErrors.cashflowRecords;
                         if (data.datasetErrors?.fundsRecords) {
                             syncError.value = '基金資料讀取失敗：' + data.datasetErrors.fundsRecords + '。其他頁面仍可使用；基金儲存已停止。';
@@ -1910,7 +1787,9 @@
                         if (!fundInterestReady.value) { syncError.value = '基金資料尚未成功載入，無法帶入利息；請重新載入雲端資料。'; return false; }
                         if (hasUnsavedFunds.value) { syncError.value = '請先儲存基金投資，再提交配息，確保帶入利息已儲存。'; return false; }
                     }
-                    const expected = key === 'cashflowRecords' ? cashflowSnapshot(value) : clone(value);
+                    if (key === 'stockRecords' && !stocksReady.value) {syncError.value='股票資料尚未成功載入，請先部署新版 GAS 並重新載入。';return false;}
+                    const expected = key === 'stockRecords' ? stockSnapshot(value) : key === 'cashflowRecords' ? cashflowSnapshot(value) : clone(value);
+                    if (key === 'stockRecords') {try {validateStockInputs(expected);} catch (err) {syncError.value=err.message;return false;}}
                     if (key === 'summaries') {
                         for (const year in expected) for (const month in expected[year]) {
                             const row = expected[year][month];
@@ -1923,7 +1802,8 @@
                             if (field !== 'date' && field !== 'note') expected[ym][field] = Number(expected[ym][field] || 0);
                         }
                     }
-                    const isRetry = !!pendingSave.value;
+                    const previousPending = pendingSave.value;
+                    const isRetry = !!previousPending;
                     pendingSave.value = { action, key, value: expected, message };
                     isSubmitting.value = true;
                     syncError.value = '';
@@ -1938,10 +1818,14 @@
                             const before = await readCloud(key);
                             if (before.datasetErrors?.[key]) throw new Error(before.datasetErrors[key]);
                             if (sameDataset(key, before[key], expected)) confirmed = before;
-                            else if (!sameDataset(key, before[key], remoteSnapshot[key])) {
+                            else if (!sameDataset(key, before[key], remoteSnapshot[key]) &&
+                                !(previousPending && sameDataset(key, before[key], previousPending.value))) {
                                 throw new Error('雲端資料已被其他裝置修改，請先保留修改內容再重新載入');
                             }
-                            else remoteSnapshot.revisions[key] = before.revisions[key];
+                            else {
+                                remoteSnapshot[key] = clone(before[key]);
+                                remoteSnapshot.revisions[key] = before.revisions[key];
+                            }
                         }
                         if (!confirmed) {
                             syncStatus.value = '正在儲存資料';
@@ -1977,7 +1861,7 @@
                 const retrySave = () => {
                     const pending = pendingSave.value;
                     if (pending) {
-                        const current = { transactions: transactions.value, summaries: allSummaries.value, assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value };
+                        const current = { transactions: transactions.value, summaries: allSummaries.value, assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value, stockRecords: stockRecords.value };
                         return saveCloud(pending.action, pending.key, current[pending.key], pending.message);
                     }
                 };
@@ -2110,7 +1994,7 @@
 
                 return {
                     cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
-                    activeTab, activeStockCode, activeStockView, stockCodes, stockRecords, isStockDerivedField, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockCumulativeTotals, stockPortfolioRefundTotal, stockPortfolioSections, previousStockPortfolio, previousStockYear, stockDisplayRows, stockManualDisplayRows, stockRegularAveragePrice, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDividendCash, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
+                    stocksReady, saveStocksRecord, activeTab, activeStockCode, activeStockView, stockCodes, stockRecords, isStockDerivedField, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockCumulativeTotals, stockPortfolioRefundTotal, stockPortfolioSections, previousStockPortfolio, previousStockYear, stockDisplayRows, stockManualDisplayRows, stockRegularAveragePrice, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDividendCash, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
                     hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,

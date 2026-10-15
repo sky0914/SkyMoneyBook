@@ -1,6 +1,6 @@
 # SkyMoneyBook 工程架構
 
-依 2026-10-14 專案原始碼整理；描述目前實作，不代表正式雲端已部署相同版本。未確認前端託管平台及 Apps Script 實際存取權限。
+依 2026-10-15 專案原始碼整理；描述目前實作，不代表正式雲端已部署相同版本。未確認前端託管平台及 Apps Script 實際存取權限。
 
 ## 系統架構
 
@@ -10,19 +10,25 @@ flowchart TB
     CDN[外部 CDN<br/>Vue 3 / Tailwind CSS / Font Awesome] -. 載入依賴 .-> UI
     subgraph Browser[瀏覽器：index.html 單頁應用]
         UI[頁面介面<br/>開銷 / 年度總表 / 基金 / 資產 / 配息]
-        Stocks[股票頁籤<br/>目前只有空白內容區]
+        Stocks[股票總覽與五檔明細]
+        Model[股票資料模型<br/>js/stocks/model.js]
+        Calc[股票公式<br/>js/stocks/calculations.js]
         State[Vue ref / computed<br/>編輯資料、篩選、金額計算]
         Sync[同步協調<br/>readCloud / saveCloud / retrySave]
         Memory[記憶體快照<br/>remoteSnapshot / cleanData / pendingSave]
         Local[localStorage<br/>只保存常用項目]
         UI --> State
         UI --> Stocks
+        Stocks --> State
+        State --> Model
+        State --> Calc
+        Calc --> Model
         State --> Sync
         Sync <--> Memory
         UI <--> Local
     end
     subgraph Backend[Google Apps Script：GAS]
-        API[doGet / doPost<br/>JSON API，protocolVersion 6]
+        API[doGet / doPost<br/>JSON API，protocolVersion 7]
         Guard[輸入與表頭驗證<br/>ScriptLock + SHA-256 revision]
         Adapter[read_ / replaceRows_<br/>資料物件與工作表欄列轉換]
         API --> Guard --> Adapter
@@ -36,6 +42,7 @@ flowchart TB
         F[基金投資明細]
         A[資產負債]
         C[現金流配息記錄]
+        StockSheet[股票投資記錄]
         Legacy[舊版基金投資<br/>相容讀取]
     end
     Adapter <--> T
@@ -43,10 +50,11 @@ flowchart TB
     Adapter <--> F
     Adapter <--> A
     Adapter <--> C
+    Adapter <--> StockSheet
     Legacy -. 新表不存在時讀取 .-> Adapter
 ```
 
-畫面、計算和同步函式都在同一份 `index.html`；圖中的前端區塊是邏輯分工，尚未拆成獨立元件或模組。後端是一份 Apps Script 原始碼，Google Sheets 是主要持久化儲存。
+股票的資料模型與計算公式已拆成兩個獨立模組；畫面、Vue 狀態與雲端同步仍位於 `index.html`。畫面元件與同步層的拆分留待後續階段。後端是一份 Apps Script 原始碼，Google Sheets 是主要持久化儲存。
 
 ## 儲存時序
 
@@ -96,7 +104,7 @@ sequenceDiagram
 | 基金投資 | `fundsRecords` | `saveFunds` | 基金投資明細，11 欄，年度／基金／月份；每年度 39 列 |
 | 總資產 | `assetsRecords` | `saveAssets` | 資產負債，42 欄，以年月索引 |
 | 配息 | `cashflowRecords` | `saveCashflow` | 現金流配息記錄，9 欄，每年度 13 列 |
-| 股票 | 尚無資料模型 | 尚無 | 尚無 |
+| 股票 | `stockRecords` | `saveStocks` | 股票投資記錄，8 欄，年度／股票／類型／月份／序號／欄位，每個非空輸入一列 |
 
 每次儲存會提交該類資料的完整集合，並更新對應工作表，不是只更新畫面目前顯示的一筆或一年。
 
@@ -117,15 +125,37 @@ flowchart LR
 - 主要財務資料及未確認修改保留在頁面記憶體；`localStorage` 僅保存常用記帳項目，沒有財務草稿持久化。
 - 後端以整類資料的內容雜湊做樂觀版本檢查；同一資料類別不同年度的更新也可能互相衝突。
 - `ScriptLock` 協調同一 Apps Script 專案的請求，無法鎖住使用者直接編輯 Sheets 或其他 Apps Script 專案的寫入。
-- 五類資料獨立儲存，沒有跨工作表交易；基金與配息的先後儲存約束由前端處理。
+- 六類資料獨立儲存，沒有跨工作表交易；基金與配息的先後儲存約束由前端處理。
 - 原始碼沒有自行實作登入與使用者授權；實際存取控制依 Apps Script 部署設定，尚未驗證。
-- `tests/sync.test.cjs`、`tests/cashflow.test.cjs` 用模擬網路與試算表驗證邏輯；`tests/browser-sync.cjs` 使用 Vue 與 Chromium，但試算表仍是模擬。這份架構整理未執行測試或操作正式財務資料。
+- `tests/sync.test.cjs`、`tests/cashflow.test.cjs` 用模擬網路與試算表驗證邏輯；`tests/browser-sync.cjs` 使用 Vue 與 Chromium，但試算表仍是模擬。本階段 66 項單元及模擬同步測試通過；未執行瀏覽器實機驗證或操作正式財務資料。
 
 ## 原始碼定位
 
-- `index.html`：介面、狀態、計算、搜尋、同步及未儲存提醒。
+- `index.html`：介面、Vue 狀態、其他頁面計算、搜尋、同步及未儲存提醒。
+- `js/stocks/model.js`：獨立股票資料模型、快照正規化與輸入驗證。
+- `js/stocks/calculations.js`：獨立股票計算公式與各層總計；只讀取輸入。
+- `STOCKS_SPEC.md`：股票資料關聯、單位、公式、結算與儲存格式。
 - `GAS`：API、資料驗證、版本檢查、工作表讀寫與舊格式相容。
 - `SYNC_SETUP.md`：部署與同步協定說明。
 - `CASHFLOW_SPEC.md`：配息欄位與基金利息帶入規則。
-- `tests/`：同步、配息與瀏覽器測試。
+- `tests/`：獨立股票模型／公式、股票整合、同步、配息與瀏覽器測試。
 - `backups/`：本地修改前的原檔備份，不是雲端財務資料備份。
+
+## 股票模組依賴（第一階段）
+
+```mermaid
+flowchart TD
+    View[index.html：股票畫面與 Vue 狀態] --> Model[js/stocks/model.js：結構與驗證]
+    View --> Engine[js/stocks/calculations.js：純計算]
+    Engine --> Model
+    View --> Sync[index.html：雲端同步]
+    Sync --> GAS[GAS：版本 7 API]
+    GAS --> Sheet[股票投資記錄]
+    Unit[stock-domain.test.cjs：無 Vue 測試] --> Model
+    Unit --> Engine
+    Integration[stocks / stock-sync 測試] --> View
+```
+
+資料模型、公式不讀寫 DOM、網路或 Vue 狀態；計算引擎透過 getter 取得當下的輸入，雲端重新載入替換資料時不會保留舊資料參照。畫面仍負責可編輯代理與目前選擇，歷史結算優先規則集中由公式模組判斷。
+
+本階段保留試算表格式、後端協定與既有畫面結構。發布前端時需包含 `index.html`、`js/stocks/model.js` 及 `js/stocks/calculations.js`，不新增建置或套件安裝步驟。
