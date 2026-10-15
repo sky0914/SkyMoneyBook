@@ -5,6 +5,8 @@
 })(globalThis, function () {
     'use strict';
     const stockCodes = Object.freeze(['00878', '00919', '0056', '00982A', '0050']);
+    // Agreed historical cutoff: pre-2026 totals are fixed, not reconstructed from old trades.
+    const stockTrackingPolicy = Object.freeze({startYear: 2026, openingDividends: 174701, openingTotalReturn: 171675});
     const overviewFields = Object.freeze(['cost','marketValue','price','estimatedFee','netValue','lots','estimatedTax','profit','dividends','totalReturn']);
     const emptyStockMonths = () => Object.fromEntries(Array.from({ length: 12 }, (_, index) => [index + 1,
         Array.from({ length: 15 }, () => ({ date: '', shares: null, fee: null, price: null }))
@@ -51,7 +53,34 @@
             check(data[year],year);
         }
     };
+    // User-provided year-end snapshots. Unknown 2024 refunds remain unspecified.
+    const stockHistoricalYears = Object.freeze({
+        2024: Object.freeze({refund: null, stocks: Object.freeze({
+            '00878': Object.freeze({lots:25,price:22.18,cost:558670,netValue:553156,profit:-5514,dividends:14740,totalReturn:9226}),
+            '00919': Object.freeze({lots:9,price:23.38,cost:209354,netValue:209911,profit:557,dividends:6480,totalReturn:7037}),
+            '0056': Object.freeze({lots:2,price:36.68,cost:73003,netValue:73183,profit:180,dividends:0,totalReturn:180})
+        })}),
+        2025: Object.freeze({refund:3515, stocks:Object.freeze({
+            '00878': Object.freeze({lots:43.128,price:21.71,cost:948764,netValue:934038,profit:-14726,dividends:64348,totalReturn:49622}),
+            '00919': Object.freeze({lots:18.194,price:22.4,cost:413524,netValue:406558,profit:-6966,dividends:36036,totalReturn:29070}),
+            '0056': Object.freeze({lots:17.081,price:36.73,cost:614503,netValue:625864,profit:11361,dividends:52129,totalReturn:63490}),
+            '00982A': Object.freeze({lots:5.780,price:14.61,cost:76936,netValue:84241,profit:7305,dividends:968,totalReturn:8273})
+        })})
+    });
+    const initializeStockHistory = data => {
+        const result = stockSnapshot(data);
+        const populated = value => value && typeof value === 'object' ? Object.values(value).some(populated) : hasStockValue(value);
+        for (const [year, historical] of Object.entries(stockHistoricalYears)) {
+            result[year] ||= emptyStockYear();
+            for (const [code, overview] of Object.entries(historical.stocks)) {
+                if (populated(result[year].stocks[code])) continue;
+                result[year].stocks[code] = emptyStockRecord();
+                Object.assign(result[year].stocks[code].overview, overview);
+            }
+        }
+        return result;
+    };
     const isStockDerivedField = (code, key) => key === 'marketValue' ||
         (stockCodes.includes(code) && ['lots', 'cost', 'netValue', 'profit', 'dividends', 'totalReturn'].includes(key));
-    return Object.freeze({stockCodes, overviewFields, hasStockValue, emptyStockRecord, emptyStockYear, stockSnapshot, validateStockInputs, isStockDerivedField});
+    return Object.freeze({stockCodes, stockTrackingPolicy, stockHistoricalYears, initializeStockHistory, overviewFields, hasStockValue, emptyStockRecord, emptyStockYear, stockSnapshot, validateStockInputs, isStockDerivedField});
 });

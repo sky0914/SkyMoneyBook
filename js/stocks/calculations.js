@@ -4,8 +4,8 @@
     else root.StockCalculations = factory(root.StockModel);
 })(globalThis, function (model) {
     'use strict';
-    const {stockCodes, overviewFields, hasStockValue, emptyStockRecord, emptyStockYear, isStockDerivedField} = model;
-    function createStockCalculations(getRecords) {
+    const {stockCodes, stockTrackingPolicy, overviewFields, hasStockValue, emptyStockRecord, emptyStockYear, isStockDerivedField} = model;
+    function createStockCalculations(getRecords, historicalRefundForYear = () => null) {
         const detailedStockCodes = stockCodes;
         const stockRecordForYear = (year, code) => getRecords()[year]?.stocks[code] || emptyStockRecord();
         const readYear = year => getRecords()[year] || emptyStockYear();
@@ -51,6 +51,8 @@
             return { ...totals, totalReturn: stockInputRound(totals.totalReturn + stockRefundTotalForYear(year)) };
         };
         const stockRefundTotalForYear = year => {
+            const historical = historicalRefundForYear(year);
+            if (hasStockValue(historical)) return stockInputNumber(historical);
             const data = readYear(year);
             return stockInputRound(detailedStockCodes.reduce((sum, code) =>
                 sum + stockRefundsForRecord(data.stocks[code]).reduce((subtotal, amount) => subtotal + stockInputNumber(amount), 0), 0));
@@ -126,14 +128,20 @@
                 averagePrice: stockAveragePrice(rows)
             };
         });
-        const stockCumulativeTotals = () => {
-            let dividends = 0, totalReturn = 0;
-            for (const year of Object.keys(getRecords())) {
-                const totals = stockAnnualTotals(Number(year));
+        const stockCumulativeTotals = (year = Math.max(stockTrackingPolicy.startYear, ...Object.keys(getRecords()).map(Number))) => {
+            const {startYear, openingDividends, openingTotalReturn} = stockTrackingPolicy;
+            // The opening figures cover all history through 2025; never add those years again.
+            if (Number(year) < startYear) return {dividends: openingDividends, totalReturn: openingTotalReturn};
+            let dividends = openingDividends, refunds = 0;
+            for (const storedYear of Object.keys(getRecords()).map(Number)) {
+                if (storedYear < startYear || storedYear > Number(year)) continue;
+                const totals = sumStockPortfolio(stockPortfolioRowsForYear(storedYear));
                 dividends += totals.dividends;
-                totalReturn += totals.totalReturn;
+                refunds += stockRefundTotalForYear(storedYear);
             }
-            return { dividends: stockInputRound(dividends), totalReturn: stockInputRound(totalReturn) };
+            const current = sumStockPortfolio(stockPortfolioRowsForYear(Number(year)));
+            return {dividends: stockInputRound(dividends),
+                totalReturn: stockInputRound(dividends + current.profit + refunds)};
         };
         const stockOverviewValue = (year, code, key) => {
             const target = stockRecordForYear(year, code).overview;

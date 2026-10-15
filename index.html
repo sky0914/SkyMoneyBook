@@ -340,7 +340,7 @@
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-chart-line"></i> 基金投資
             </button>
-            <button @click="activeTab = 'stocks'" :aria-current="activeTab === 'stocks' ? 'page' : null"
+            <button @click="openStocksTab" :aria-current="activeTab === 'stocks' ? 'page' : null"
                 :class="activeTab === 'stocks' ? 'tab-active' : 'tab-idle'"
                 class="px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition flex items-center gap-2 border cursor-pointer whitespace-nowrap">
                 <i aria-hidden="true" class="fa-solid fa-arrow-trend-up"></i> 股票
@@ -362,6 +362,37 @@
 
         <!-- ================= 頁籤：股票 ================= -->
         <section v-show="activeTab === 'stocks'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
+            <div v-if="stockImportDialog" class="fixed inset-0 z-40 bg-slate-900/35 flex items-center justify-center p-4" @click.self="closeStockImport" @keydown.esc.prevent="closeStockImport" @keydown.tab="trapStockImportFocus">
+                <section role="dialog" aria-modal="true" aria-labelledby="stock-import-title" class="entry-dialog w-full max-w-3xl p-4 sm:p-6">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <h2 id="stock-import-title" class="text-lg font-semibold">匯入 {{ stockImportDialog.code }} · {{ stockImportDialog.year }} 年 {{ stockImportDialog.month }} 月定期定額</h2>
+                        <button @click="closeStockImport" aria-label="關閉匯入" class="px-3 py-2 rounded-xl border border-borderCol">✕</button>
+                    </div>
+                    <p class="text-sm text-gray-400 mb-2">從試算表複製「日期、股數、購入價格、手續費、單價」五欄後貼上，可包含表頭及最後的總計。最多 15 筆。</p>
+                    <p class="text-xs text-gray-400 mb-3">購入價格依 INT(股數 × 單價) 重算；同一天多筆會分別保留。只取代此月份，不影響其他月份與股票。</p>
+                    <label for="stock-import-text" class="block text-sm mb-1">貼上試算表資料</label>
+                    <textarea id="stock-import-text" v-model="stockImportDialog.text" @input="stockImportDialog.preview = null; stockImportDialog.error = ''" rows="7" class="w-full border border-borderCol rounded-xl p-3 font-mono text-sm bg-darkBg" placeholder="日期&#9;股數&#9;購入價格&#9;手續費&#9;單價"></textarea>
+                    <p v-if="stockImportDialog.error" role="alert" class="text-sm text-rose-400 mt-2">{{ stockImportDialog.error }}</p>
+                    <div v-if="stockImportDialog.preview" class="mt-3">
+                        <p class="text-sm mb-2">預覽 {{ stockImportDialog.preview.rows.length }} 筆。此月份原有 {{ stockImportDialog.existingCount }} 筆有填寫內容的資料，確認後會整月取代，剩餘列清空。</p>
+                        <ul v-if="stockImportDialog.preview.warnings.length" class="text-sm text-amber-300 mb-2 list-disc pl-5"><li v-for="warning in stockImportDialog.preview.warnings" :key="warning">{{ warning }}</li></ul>
+                        <div class="cashflow-scroll">
+                            <table class="cashflow-table stock-table stock-month-table w-full border-collapse text-sm" aria-label="定期定額匯入預覽">
+                                <thead><tr><th>日期</th><th>股數</th><th>購入價格</th><th>手續費</th><th>單價</th></tr></thead>
+                                <tbody><tr v-for="(row,index) in stockImportDialog.preview.rows" :key="index"><td>{{ row.date }}</td><td>{{ row.shares }}</td><td>{{ formatMoney(stockPurchase(row)) }}</td><td>{{ row.fee === null ? '—' : formatMoney(row.fee) }}</td><td>{{ row.price }}</td></tr></tbody>
+                                <tfoot><tr><th>合計</th><td>{{ stockImportDialog.preview.totals.shares }}</td><td>{{ formatMoney(stockImportDialog.preview.totals.purchase) }}</td><td>{{ formatMoney(stockImportDialog.preview.totals.fee) }}</td><td></td></tr></tfoot>
+                            </table>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-3">套用後請按「儲存股票資料」，才會寫入試算表。</p>
+                    <div class="flex flex-wrap justify-end gap-2 mt-4">
+                        <button @click="closeStockImport" class="px-4 py-2 border border-borderCol rounded-xl text-sm">取消</button>
+                        <button @click="previewStockImport" class="px-4 py-2 border border-borderCol rounded-xl text-sm">預覽資料</button>
+                        <button @click="applyStockImport" :disabled="!stockImportDialog.preview || isSubmitting" class="primary-action px-4 py-2 rounded-xl text-sm disabled:opacity-40">確認取代本月資料</button>
+                    </div>
+                </section>
+            </div>
+
             <div class="stock-save-toolbar flex flex-wrap items-center justify-between gap-3 mb-4" role="group" aria-label="股票儲存操作">
                 <p class="text-xs text-gray-400">一次儲存全部股票與年度，包含前一年結算資料。<span v-if="dirtySectionNames.includes('股票投資')" class="text-amber-300">有尚未儲存的修改</span></p>
                 <button @click="saveStocksRecord" :disabled="isSubmitting || !stocksReady" class="primary-action px-4 py-2 rounded-xl text-sm disabled:opacity-40">{{ isSubmitting ? '同步中…' : '儲存股票資料' }}</button>
@@ -373,8 +404,9 @@
             </nav>
             <div v-show="activeStockView === 'overview'">
                 <div class="mb-6" role="group" aria-label="股票歷年累計">
-                    <h2 class="text-lg font-semibold text-white mb-2">歷年累計</h2>
-                    <p class="text-xs text-gray-400 mb-3">加總所有已輸入年度，各年度只計算一次。</p>
+                    <h2 class="text-lg font-semibold text-white mb-2">歷年累計（截至 {{ Math.max(selectedYear, stockTrackingPolicy.startYear - 1) }} 年）</h2>
+                    <p class="text-xs text-gray-400 mb-3">2025 年底累計配息 174,701 元為固定起點；2026 年起累加配息與退手續費，投資損益只採所選年度數值。2025 年以前不再補算。</p>
+                    <p class="text-xs text-gray-400 mb-3">下方年度表格顯示各年資料；上方總收益為累計配息＋所選年度投資損益＋2026 年起累計退手續費。</p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div class="bg-darkBg border border-borderCol rounded-xl px-4 py-3 flex items-center justify-between gap-3"><span class="text-sm text-gray-400">總配息</span><span class="font-semibold font-mono">{{ formatMoney(stockCumulativeTotals.dividends) }}</span></div>
                         <div class="bg-darkBg border border-borderCol rounded-xl px-4 py-3 flex items-center justify-between gap-3"><span class="text-sm text-gray-400">總收益</span><span class="font-semibold font-mono text-rose-400">{{ formatMoney(stockCumulativeTotals.totalReturn) }}</span></div>
@@ -383,12 +415,13 @@
                 <section v-for="portfolio in stockPortfolioSections" :key="portfolio.year" class="mb-6 last:mb-0">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <h2 :id="'stock-portfolio-' + portfolio.year" class="text-lg font-semibold text-white">{{ portfolio.year }} 年股票市值</h2>
-                    <div class="inline-flex items-center gap-3 bg-darkBg border border-borderCol rounded-xl px-3 py-1.5 whitespace-nowrap" :aria-label="portfolio.year + ' 年退手續費'">
+                    <div v-if="!portfolio.historical || stockHistoricalYears[portfolio.year].refund !== null" class="inline-flex items-center gap-3 bg-darkBg border border-borderCol rounded-xl px-3 py-1.5 whitespace-nowrap" :aria-label="portfolio.year + ' 年退手續費'">
                         <span class="text-xs text-gray-400">年度退手續費</span>
                         <span class="text-sm font-semibold font-mono text-emerald-400">{{ formatMoney(portfolio.refund) }}</span>
                     </div>
                 </div>
-                <p v-if="portfolio.previous" class="text-xs text-gray-400 mb-2">與該年度共用資料；可補填結算值，清空後會依該年明細計算。</p>
+                <p v-if="portfolio.historical" class="text-xs text-gray-400 mb-2">歷史結算資料；空白記錄依提供的年度表帶入，已填寫內容保留。未持有的股票不列出，請按「儲存股票資料」保存新增的歷史值。</p>
+                <p v-else-if="portfolio.previous" class="text-xs text-gray-400 mb-2">與該年度共用資料；可補填結算值，清空後會依該年明細計算。</p>
                 <p class="text-xs text-gray-400 mb-3">配息月份：00878（2／5／8／11）、00919（3／6／9／12）、0056（1／4／7／10）、00982A（2／5／8／11）</p>
                 <div class="cashflow-scroll overflow-x-auto">
                     <table class="stock-table stock-portfolio-table cashflow-table text-sm border-collapse" :aria-labelledby="'stock-portfolio-' + portfolio.year">
@@ -480,12 +513,17 @@
             <div class="stocks-monthly">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <h2 id="stock-month-title" class="text-lg font-semibold text-white">{{ selectedStockMonth }}月定期定額</h2>
-                    <label class="flex items-center gap-2 text-sm text-gray-400">
-                        月份
-                        <select v-model.number="selectedStockMonth" aria-label="股票明細月份" class="bg-darkBg border border-borderCol rounded-xl px-3 py-1 text-sm">
+                    <div class="flex flex-wrap items-center gap-2">
+                    <button @click="openStockImport" :disabled="isSubmitting" class="tab-idle border border-borderCol px-3 py-1.5 rounded-xl text-sm">匯入本月</button>
+                    <div role="group" aria-label="切換定期定額月份" class="flex items-center gap-2 text-sm text-gray-400">
+                        <label for="stock-month-select">月份</label>
+                        <button type="button" @click="selectedStockMonth = Math.max(1, selectedStockMonth - 1)" :disabled="isSubmitting || selectedStockMonth === 1" aria-label="上個月定期定額" title="上個月" class="tab-idle border border-borderCol rounded-xl w-11 h-11 flex items-center justify-center text-xl disabled:opacity-40"><span aria-hidden="true">‹</span></button>
+                        <select id="stock-month-select" v-model.number="selectedStockMonth" :disabled="isSubmitting" aria-label="股票明細月份" class="bg-darkBg border border-borderCol rounded-xl px-3 py-1 min-h-[44px] text-sm">
                             <option v-for="month in 12" :key="month" :value="month">{{ month }} 月</option>
                         </select>
-                    </label>
+                        <button type="button" @click="selectedStockMonth = Math.min(12, selectedStockMonth + 1)" :disabled="isSubmitting || selectedStockMonth === 12" aria-label="下個月定期定額" title="下個月" class="tab-idle border border-borderCol rounded-xl w-11 h-11 flex items-center justify-center text-xl disabled:opacity-40"><span aria-hidden="true">›</span></button>
+                    </div>
+                </div>
                 </div>
                 <p class="text-xs text-gray-400 mb-3">定期日期：1 / 3 / 5 / 7 / 9 / 11 / 13 / 15 / 17 / 19 / 21 / 23 / 25 / 27 / 29</p>
                 <div class="cashflow-scroll overflow-x-auto">
@@ -1175,6 +1213,7 @@
 
     <script src="js/stocks/model.js"></script>
     <script src="js/stocks/calculations.js"></script>
+    <script src="js/stocks/import.js"></script>
 
     <!-- ================= Vue.js 前端邏輯 ================= -->
     <script>
@@ -1195,9 +1234,19 @@
                     [{ key: 'estimatedTax', label: '預估交易稅' }, { key: 'profit', label: '投資損益', signed: true }],
                     [{ key: 'dividends', label: '配息' }, { key: 'totalReturn', label: '總收益', signed: true }]
                 ];
-                const {stockCodes, emptyStockYear, stockSnapshot, validateStockInputs, isStockDerivedField} = StockModel;
+                const {stockCodes, stockTrackingPolicy, stockHistoricalYears, emptyStockYear, stockSnapshot, validateStockInputs, isStockDerivedField} = StockModel;
                 const stockRecords = ref({});
-                const stockCalculations = StockCalculations.createStockCalculations(() => stockRecords.value);
+                const stockHistoryInitialized = ref(false);
+                const loadStockHistory = () => {
+                    stockRecords.value = StockModel.initializeStockHistory(stockRecords.value);
+                    stockHistoryInitialized.value = true;
+                };
+                const openStocksTab = () => {
+                    loadStockHistory();
+                    activeTab.value = 'stocks';
+                };
+                const stockCalculations = StockCalculations.createStockCalculations(() => stockRecords.value,
+                    year => stockHistoryInitialized.value ? stockHistoricalYears[year]?.refund ?? null : null);
                 const {stockPurchase, stockDividendCash, stockMonthTotals, stockOrderTotals, stockAveragePrice,
                     stockRefundsForRecord, stockAnnualTotals, stockRefundTotalForYear} = stockCalculations;
                 const stocksReady = ref(false);
@@ -1210,6 +1259,61 @@
                 const ensureStockYear = year => stockRecords.value[year] ||= emptyStockYear();
                 const stockRecordForYear = (year, code) => ensureStockYear(year).stocks[code];
                 const currentStockRecord = computed(() => stockRecordForYear(selectedYear.value, activeStockCode.value));
+                const stockImportDialog = ref(null);
+                const stockImportTargetRows = target => stockRecords.value[target.year]?.stocks[target.code]?.monthlyRecords[target.month] || StockModel.emptyStockRecord().monthlyRecords[target.month];
+                const importHasValue = row => Object.values(row).some(StockModel.hasStockValue);
+                let stockImportTrigger = null;
+                const openStockImport = event => {
+                    if (isSubmitting.value) return;
+                    stockImportTrigger = event?.currentTarget || null;
+                    stockImportDialog.value = {year: selectedYear.value, code: activeStockCode.value, month: selectedStockMonth.value, text: '', preview: null, error: '', existingCount: 0};
+                    Promise.resolve().then(() => {
+                        if (typeof document !== 'undefined') document.getElementById('stock-import-text')?.focus();
+                    });
+                };
+                const trapStockImportFocus = event => {
+                    const controls = Array.from(event.currentTarget.querySelectorAll('button:not([disabled]), textarea'));
+                    const first = controls[0], last = controls.at(-1);
+                    if (event.shiftKey && event.target === first) {event.preventDefault();last?.focus();}
+                    else if (!event.shiftKey && event.target === last) {event.preventDefault();first?.focus();}
+                };
+                const closeStockImport = () => {
+                    stockImportDialog.value = null;
+                    stockImportTrigger?.focus();
+                    stockImportTrigger = null;
+                };
+                const previewStockImport = () => {
+                    const dialog = stockImportDialog.value;
+                    if (!dialog || isSubmitting.value) return false;
+                    dialog.preview = null;
+                    dialog.error = '';
+                    try {
+                        const preview = StockImport.parseMonthlyPaste(dialog.text, dialog);
+                        const originalRows = stockImportTargetRows(dialog);
+                        dialog.existingCount = originalRows.filter(importHasValue).length;
+                        dialog.preview = {...preview, source: dialog.text, original: JSON.stringify(originalRows)};
+                        return true;
+                    } catch (err) {dialog.error = err.message;return false;}
+                };
+                const applyStockImport = () => {
+                    const dialog = stockImportDialog.value;
+                    if (!dialog?.preview || isSubmitting.value) return false;
+                    if (dialog.year !== selectedYear.value || dialog.code !== activeStockCode.value || dialog.month !== selectedStockMonth.value) {
+                        dialog.error = '目前選擇的年度、股票或月份已變更，請關閉後重新匯入。';return false;
+                    }
+                    if (dialog.preview.source !== dialog.text || dialog.preview.original !== JSON.stringify(stockImportTargetRows(dialog))) {
+                        dialog.preview = null;dialog.error = '資料已變更，請重新預覽後再確認。';return false;
+                    }
+                    // Parse once more before committing; invalid input never partially changes a month.
+                    try {
+                        const imported = StockImport.parseMonthlyPaste(dialog.text, dialog);
+                        stockRecordForYear(dialog.year, dialog.code).monthlyRecords[dialog.month] = imported.monthlyRows;
+                        closeStockImport();
+                        syncStatus.value = '本月匯入已套用，尚未儲存至試算表';
+                        syncError.value = '';
+                        return true;
+                    } catch (err) {dialog.error = err.message;return false;}
+                };
                 const stockOverviewForCode = (code, year, historical = false) => new Proxy(stockRecordForYear(year, code).overview, {
                     get: (target, key) => stockCalculations.stockOverviewValue(year, code, key),
                     set: (target, key, value) => !historical && isStockDerivedField(code, key) ? true : Reflect.set(target, key, value)
@@ -1223,7 +1327,8 @@
                 ];
                 const stockPortfolioRowsForYear = (year, historical = false) => stockCodes.map(code => ({
                     code, overview: stockOverviewForCode(code, year, historical)
-                }));
+                })).filter(row => !stockHistoryInitialized.value || Number(row.overview.lots) > 0 ||
+                    Number(row.overview.cost) > 0 || Number(row.overview.dividends) > 0);
                 const stockPortfolioRows = computed(() => stockPortfolioRowsForYear(selectedYear.value));
                 const previousStockYear = computed(() => ensureStockYear(selectedYear.value - 1));
                 const previousStockPortfolio = computed(() => ({
@@ -1238,6 +1343,7 @@
                 const selectedStockMonth = ref(currentStockMonth());
                 watch(activeTab, tab => {
                     if (tab === 'stocks') {
+                        loadStockHistory();
                         activeStockView.value = 'overview';
                         selectedStockMonth.value = currentStockMonth();
                     }
@@ -1260,12 +1366,19 @@
                     }
                 };
                 const stockPortfolioTotals = computed(() => stockAnnualTotals(selectedYear.value, stockPortfolioRows.value));
-                const stockCumulativeTotals = computed(() => stockCalculations.stockCumulativeTotals());
+                const stockCumulativeTotals = computed(() => stockCalculations.stockCumulativeTotals(selectedYear.value));
                 const stockPortfolioRefundTotal = computed(() => stockRefundTotalForYear(selectedYear.value));
-                const stockPortfolioSections = computed(() => [
-                    { year: selectedYear.value, rows: stockPortfolioRows.value, totals: stockPortfolioTotals.value, refund: stockPortfolioRefundTotal.value, previous: false },
-                    { year: selectedYear.value - 1, rows: previousStockPortfolio.value.rows, totals: stockAnnualTotals(selectedYear.value - 1, previousStockPortfolio.value.rows), refund: previousStockPortfolio.value.refund, previous: true }
-                ]);
+                const stockPortfolioSections = computed(() => {
+                    const years = [selectedYear.value, selectedYear.value - 1];
+                    if (stockHistoryInitialized.value) for (const year of Object.keys(stockHistoricalYears).map(Number)) {
+                        if (year <= selectedYear.value && !years.includes(year)) years.push(year);
+                    }
+                    return years.sort((a,b) => b-a).map(year => {
+                        const rows = stockPortfolioRowsForYear(year, year !== selectedYear.value);
+                        return {year, rows, totals: stockAnnualTotals(year, rows), refund: stockRefundTotalForYear(year),
+                            previous: year !== selectedYear.value, historical: !!stockHistoricalYears[year] && stockHistoryInitialized.value};
+                    }).filter(section => !stockHistoryInitialized.value || section.rows.length > 0 || section.year >= stockTrackingPolicy.startYear);
+                });
                 const stockRegularTotals = computed(() => stockOrderTotals(stockDisplayRows.value));
                 const stockManualTotals = computed(() => stockOrderTotals(stockManualDisplayRows.value));
                 const stockDividendTotals = computed(() => stockCalculations.stockDividendTotals(activeStockCode.value, selectedYear.value));
@@ -1727,7 +1840,7 @@
                 const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
                 const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息', stockRecords: '股票投資' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
-                const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value);
+                const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value || !!stockImportDialog.value?.text.trim());
 
                 const fetchData = async () => {
                     if (isSubmitting.value) return;
@@ -1762,7 +1875,9 @@
                         }
                         const current = datasetRefs();
                         for (const key in current) if (!data.datasetErrors?.[key] && (key !== 'stockRecords' || stocksReady.value)) cleanData.value[key] = clone(current[key]);
+                        if (activeTab.value === 'stocks' && stocksReady.value) loadStockHistory();
                         showModal.value = false;
+                        closeStockImport();
                         syncStatus.value = '雲端資料讀取完成';
                         if (data.datasetErrors?.stockRecords) syncError.value = '股票資料讀取失敗：' + data.datasetErrors.stockRecords;
                         if (data.datasetErrors?.cashflowRecords) syncError.value = '配息資料讀取失敗：' + data.datasetErrors.cashflowRecords;
@@ -1994,7 +2109,7 @@
 
                 return {
                     cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
-                    stocksReady, saveStocksRecord, activeTab, activeStockCode, activeStockView, stockCodes, stockRecords, isStockDerivedField, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockCumulativeTotals, stockPortfolioRefundTotal, stockPortfolioSections, previousStockPortfolio, previousStockYear, stockDisplayRows, stockManualDisplayRows, stockRegularAveragePrice, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDividendCash, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
+                    stockImportDialog, openStockImport, closeStockImport, trapStockImportFocus, previewStockImport, applyStockImport, stocksReady, saveStocksRecord, stockTrackingPolicy, stockHistoricalYears, openStocksTab, activeTab, activeStockCode, activeStockView, stockCodes, stockRecords, isStockDerivedField, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockCumulativeTotals, stockPortfolioRefundTotal, stockPortfolioSections, previousStockPortfolio, previousStockYear, stockDisplayRows, stockManualDisplayRows, stockRegularAveragePrice, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDividendCash, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
                     hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,

@@ -231,37 +231,35 @@ test('portfolio refunds equal the five supported stocks annual totals in the sam
   assert.equal(a.stockPortfolioRefundTotal.value, expected - 70);
 });
 
-test('cumulative dividends and returns include every year once and do not follow the selected year', () => {
+test('cumulative results use the fixed opening balance and selected-year profit without replaying history', () => {
   const a = create();
   a.selectedYear.value = 2025;
-  Object.assign(a.previousStockPortfolio.value.rows[0].overview, { dividends: 100, totalReturn: 200 }); // 2024
+  Object.assign(a.previousStockPortfolio.value.rows[0].overview, { dividends: 100, totalReturn: 200 });
   Object.assign(a.stockDividendRows.value[0], { shares: 1, perShare: 0.5, transferFee: 10 });
-  setClosingProfit(a, 110); // 110 profit + 490 net dividends
+  setClosingProfit(a, 110);
   a.selectedYear.value = 2026;
   a.activeStockCode.value = '00919';
   Object.assign(a.stockDividendRows.value[0], { shares: 2, perShare: 0.6, transferFee: 20 });
-  setClosingProfit(a, -1230); // -1230 profit + 1180 net dividends
+  setClosingProfit(a, -1230);
   Object.assign(a.stockRecords.value[2026].stocks['0056'].dividends[0], { shares: 1, perShare: 0.03, transferFee: 0 });
-  setClosingProfit(a, 10, '0056'); // 10 profit + 30 net dividends
+  setClosingProfit(a, 10, '0056');
   assert.equal(a.stockPortfolioTotals.value.dividends, 1210);
-  assert.equal(a.stockCumulativeTotals.value.dividends, 1800);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 790);
+  assert.equal(a.stockCumulativeTotals.value.dividends, 175911);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 174691);
   assert.equal(a.stockPortfolioSections.value[1].totals.dividends, 490);
-  assert.equal(a.stockCumulativeTotals.value.dividends, 1800); // Viewing 2025 twice must not count twice.
-  a.selectedYear.value = 2024;
-  assert.equal(a.stockPortfolioTotals.value.dividends, 100);
-  assert.equal(a.stockCumulativeTotals.value.dividends, 1800);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 790);
   a.selectedYear.value = 2025;
+  assert.equal(a.stockCumulativeTotals.value.dividends, 174701);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 171675);
   a.previousStockPortfolio.value.rows[0].overview.totalReturn = '';
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 590);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 171675);
+  a.selectedYear.value = 2026;
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 174691);
   a.selectedYear.value = 2027;
-  assert.equal(a.stockPortfolioTotals.value.dividends, 0);
-  assert.equal(a.stockCumulativeTotals.value.dividends, 1800);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 590);
+  assert.equal(a.stockCumulativeTotals.value.dividends, 175911);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 175911);
 });
 
-test('annual return adds that year refund once and cumulative return sums those annual totals', () => {
+test('annual table keeps its own totals while cumulative returns exclude historical profits and refunds', () => {
   const a = create();
   a.selectedYear.value = 2025;
   setClosingProfit(a, 100);
@@ -283,17 +281,17 @@ test('annual return adds that year refund once and cumulative return sums those 
   assert.equal(a.stockPortfolioRefundTotal.value, 78);
   assert.equal(a.stockPortfolioTotals.value.totalReturn, 578);
   assert.equal(a.stockPortfolioSections.value[1].totals.totalReturn, 168);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 746);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 175279);
   assert.equal(a.stockOverview.value.totalReturn, 300); // Do not write refunds into per-stock returns.
 
   a.activeStockCode.value = '00878';
   a.stockMonthlyRows.value[0].fee = 20;
   assert.equal(a.stockPortfolioTotals.value.totalReturn, 568);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 736);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 175269);
   assert.equal(a.stockOverview.value.totalReturn, 200);
   a.selectedYear.value = 2025;
   assert.equal(a.stockPortfolioTotals.value.totalReturn, 168);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 736);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 171675);
 });
 
 test('per-stock return follows profit plus net dividends as prices and transfer fees change', () => {
@@ -416,9 +414,9 @@ test('entered year-end returns remain closing values while later-year prices cha
   a.stockOverview.value.price = 50;
   assert.equal(a.stockPortfolioSections.value[1].totals.totalReturn, 120);
   assert.equal(a.stockPortfolioTotals.value.totalReturn, 3999);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 4119);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 178700);
   a.stockOverview.value.price = 60;
   assert.equal(a.stockPortfolioSections.value[1].totals.totalReturn, 120);
   assert.equal(a.stockPortfolioTotals.value.totalReturn, 4999);
-  assert.equal(a.stockCumulativeTotals.value.totalReturn, 5119);
+  assert.equal(a.stockCumulativeTotals.value.totalReturn, 179700);
 });

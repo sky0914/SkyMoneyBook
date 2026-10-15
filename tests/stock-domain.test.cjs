@@ -48,7 +48,7 @@ test('standalone engine calculates cross-year cost, holdings, payouts and refund
  for(const [key,value] of Object.entries(expected))assert.equal(calc.stockOverviewValue(2026,'00878',key),value,key);
  assert.equal(calc.stockAnnualRows(r)[9].averagePrice,20.12);
  assert.equal(calc.stockAnnualTotals(2026).totalReturn,26908);
- assert.deepEqual(calc.stockCumulativeTotals(),{dividends:590,totalReturn:27308});
+ assert.deepEqual(calc.stockCumulativeTotals(2026),{dividends:175191,totalReturn:201609});
  calc.stockAnnualTotals(2027);assert.equal(data[2027],undefined);assert.equal(JSON.stringify(data),before);
 });
 
@@ -64,7 +64,7 @@ test('engine follows replacement cloud records and edits without caching stale s
 test('ordinary browser scripts load in HTML order without Vue or module loader dependencies',()=>{
  const html=fs.readFileSync('index.html','utf8'),context=vm.createContext({});
  const scripts=[...html.matchAll(/<script src="(js\/stocks\/[^\"]+)"><\/script>/g)].map(match=>match[1]);
- assert.deepEqual(scripts,['js/stocks/model.js','js/stocks/calculations.js']);
+ assert.deepEqual(scripts,['js/stocks/model.js','js/stocks/calculations.js','js/stocks/import.js']);
  assert.ok(html.indexOf('src="js/stocks/calculations.js"')<html.indexOf('createApp({'));
  for(const source of scripts)vm.runInContext(fs.readFileSync(source,'utf8'),context,{filename:source});
  assert.equal(context.StockModel.stockCodes.length,5);
