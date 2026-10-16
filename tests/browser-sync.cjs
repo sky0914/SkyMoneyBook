@@ -13,9 +13,9 @@ const {backend}=require('./helpers.cjs');
   const html=fs.readFileSync('index.html','utf8');
   await page.route('**/*',async route=>{
    const req=route.request(),url=req.url();
-   if(url.startsWith('http://skymoneybook.test/js/stocks/')) {
+   if((url.startsWith('http://skymoneybook.test/js/stocks/') || url.startsWith('http://skymoneybook.test/js/deposits/'))) {
     const name=new URL(url).pathname.slice(1);
-    if (!['js/stocks/model.js','js/stocks/calculations.js','js/stocks/import.js'].includes(name)) return route.abort();
+    if (!['js/stocks/model.js','js/stocks/calculations.js','js/stocks/import.js','js/deposits/model.js'].includes(name)) return route.abort();
     return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(name,'utf8')});
    }
    if(url.includes('/macros/s/')) {

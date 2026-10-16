@@ -20,7 +20,7 @@ function frontend(api){
  return {ok:true,json:async()=>api.read(new URL(url).searchParams.get('dataset'))};
  }});
  const html=fs.readFileSync('index.html','utf8');
- for (const [,source] of html.matchAll(/<script src="(js\/stocks\/[^"]+)"><\/script>/g)) vm.runInContext(fs.readFileSync(source,'utf8'),ctx,{filename:source});
+ for (const [,source] of html.matchAll(/<script src="(js\/(?:stocks|deposits)\/[^"]+)"><\/script>/g)) vm.runInContext(fs.readFileSync(source,'utf8'),ctx,{filename:source});
  vm.runInContext([...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1],ctx);
  return {app,setMode:m=>mode=m,posts:()=>posts,requests,confirmations,setConfirm:value=>confirmAnswer=value,emit:(name,event)=>listeners[name]?.(event)};
 }

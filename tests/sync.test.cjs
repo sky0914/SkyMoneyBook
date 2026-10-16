@@ -107,7 +107,7 @@ test('normal changed save uses two requests and reads only the selected workshee
 test('dataset GET returns only requested data and does not read unrelated tables',()=>{
  const api=backend();api.seed('明細',[['日期','項目','金額','分類','類型'],['2026-10-14','test',10,'其它','expense']]);
  api.seed('年度摘要',[['年份','月份']]);api.resetReads();
- const data=api.read('transactions');assert.equal(data.transactions.length,1);assert.equal(data.summaries,undefined);assert.equal(data.fundsRecords,undefined);assert.equal(data.protocolVersion,7);
+ const data=api.read('transactions');assert.equal(data.transactions.length,1);assert.equal(data.summaries,undefined);assert.equal(data.fundsRecords,undefined);assert.equal(data.protocolVersion,8);
  assert.deepEqual(Object.keys(data.revisions),['transactions']);assert.equal(api.reads['明細'],1);assert.equal(api.reads['年度摘要']||0,0);
  assert.equal(api.read('not-a-dataset').status,'error');
 });

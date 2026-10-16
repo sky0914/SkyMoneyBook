@@ -107,7 +107,7 @@ function rows_(ss, name) {
 }
 function read_(ss, key) {
   var timezone = ss.getSpreadsheetTimeZone();
-  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {}};
+  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {}, depositRecords: {}};
   if (!key || key === 'transactions') rows_(ss, '明細').forEach(function(r, i) {
     if (!r[0]) return;
     result.transactions.push({id: i + 1, date: date_(r[0], ss, timezone), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
@@ -133,9 +133,11 @@ function read_(ss, key) {
   catch (err) { result.datasetErrors.cashflowRecords = String(err); }
   try { if (!key || key === 'stockRecords') result.stockRecords = readStocks_(ss); }
   catch (err) { result.datasetErrors.stockRecords = String(err); }
+  try { if (!key || key === 'depositRecords') result.depositRecords = readDeposits_(ss); }
+  catch (err) { result.datasetErrors.depositRecords = String(err); }
   result.revisions = {};
-  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
-  result.protocolVersion = 7;
+  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords','depositRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
+  result.protocolVersion = 8;
   if (key) {
     var selected = {revisions: result.revisions, datasetErrors: result.datasetErrors, protocolVersion: result.protocolVersion};
     selected[key] = result[key];
@@ -148,7 +150,7 @@ function doGet(e) {
   try {
     lock.waitLock(10000);
     var key = e && e.parameter && e.parameter.dataset;
-    if (key && ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
+    if (key && ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords','depositRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
     return json_(read_(SpreadsheetApp.openById(BOOK_ID), key));
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
@@ -173,6 +175,10 @@ function replaceRows_(ss, name, rows) {
     sheet.getRange(1,2,rows.length,1).setNumberFormat('@');
     sheet.getRange(1,8,rows.length,1).setNumberFormat('@');
   }
+  if (name === '定存記錄-台幣') {
+    sheet.getRange(1,4,rows.length,1).setNumberFormat('@');
+    sheet.getRange(1,6,rows.length,3).setNumberFormat('@');
+  }
   // Write one validated batch before removing leftover rows. Keep formatting intact.
   sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
   if (previousRows > rows.length) sheet.getRange(rows.length + 1, 1, previousRows - rows.length, rows[0].length).clearContent();
@@ -181,7 +187,7 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
     var payload = JSON.parse(e.postData.contents);
-    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveCashflow: 'cashflowRecords', saveStocks: 'stockRecords'};
+    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveCashflow: 'cashflowRecords', saveStocks: 'stockRecords', saveDeposits: 'depositRecords'};
     var key = actions[payload.action];
     if (!key || typeof payload.expectedRevision !== 'string') throw new Error('Unsupported action or missing revision; reload the updated webpage');
     var data = payload[key], rows, name;
@@ -222,6 +228,8 @@ function doPost(e) {
           if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(ym) || !object_(data[ym])) throw new Error('Invalid record month');
           rows.push([ym].concat(ASSET_FIELDS.map(function(field) { return field === 'date' || field === 'note' ? String(data[ym][field] || '') : numeric_(data[ym][field]); })));
         });
+      } else if (key === 'depositRecords') {
+        name = '定存記錄-台幣'; rows = depositRows_(data);
       } else if (key === 'stockRecords') {
         name = '股票投資記錄'; rows = stockRows_(data);
       } else if (key === 'cashflowRecords') {
@@ -387,4 +395,53 @@ function stockRows_(data) {
     });
   });
   return rows;
+}
+
+var DEPOSIT_HEADERS = ['年份','序號','金額','利率','利息','日期','狀態','備註'];
+var DEPOSIT_FIELDS = ['amount','rate','interest','date','status','note'];
+function depositCell_(value,field,ss) {
+  if (value===null || value===undefined || value==='') return '';
+  if (field==='amount' || field==='interest') {
+    if (typeof value==='string' && !value.trim()) throw new Error('定存數值無效');
+    var number=numeric_(value);
+    if (number<0) throw new Error('定存金額與利息不得為負數');
+    return number;
+  }
+  if (field==='date' && value instanceof Date) return date_(value,ss);
+  if (typeof value!=='string') throw new Error('定存文字欄位格式無效，請保留文字格式');
+  if (field==='rate' && !/^\d+(?:\.\d+)?%?$/.test(value)) throw new Error('定存利率格式無效，請使用文字，例如 1.50%');
+  return value;
+}
+function depositRows_(data) {
+  var rows=[DEPOSIT_HEADERS.slice()];
+  Object.keys(data).sort().forEach(function(year) {
+    var annual=data[year];
+    if (!/^[1-9]\d{3}$/.test(year) || !Array.isArray(annual) || annual.length>1000) throw new Error('定存年份或資料列格式無效');
+    annual.forEach(function(record,index) {
+      if (!object_(record) || Object.keys(record).some(function(key){return DEPOSIT_FIELDS.indexOf(key)<0;})) throw new Error('未知定存欄位');
+      rows.push([year,index+1].concat(DEPOSIT_FIELDS.map(function(field){return depositCell_(record[field],field);})));
+    });
+  });
+  return rows;
+}
+function readDeposits_(ss) {
+  var result={},sheet=ss.getSheetByName('定存記錄-台幣'),seen={};
+  if (!sheet) return result;
+  var values=sheet.getDataRange().getValues();
+  if (sheet.getLastRow() && canonical_(values[0].slice(0,DEPOSIT_HEADERS.length))!==canonical_(DEPOSIT_HEADERS)) throw new Error('定存工作表欄位不符，已停止讀寫，請保留原資料');
+  values.slice(1).forEach(function(row) {
+    if (row.every(function(v){return v==='' || v===null || v===undefined;})) return;
+    var year=String(row[0]),index=Number(row[1]),id=year+'-'+index;
+    if (!/^[1-9]\d{3}$/.test(year) || !Number.isInteger(index) || index<1 || index>1000 || seen[id]) throw new Error('定存年份、序號無效或重複');
+    seen[id]=true;
+    if (!result[year]) result[year]=[];
+    var record={};
+    DEPOSIT_FIELDS.forEach(function(field,i){record[field]=depositCell_(row[i+2],field,ss);});
+    result[year][index-1]=record;
+  });
+  Object.keys(result).forEach(function(year){
+    var annual=result[year];
+    for (var i=0;i<annual.length;i++) if (!annual[i]) throw new Error('定存序號不連續，請保留原資料並確認序號');
+  });
+  return result;
 }

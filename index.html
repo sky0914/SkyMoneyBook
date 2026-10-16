@@ -141,7 +141,8 @@
         @media (max-width: 960px) {
             .ledger-theme .stocks-layout { grid-template-columns: minmax(0, 1fr); }
         }
-        .ledger-theme .transaction-table { min-width: 640px; }
+        .ledger-theme .transaction-table { min-width: 680px; }
+        .ledger-theme .transaction-table input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; padding: 0; cursor: pointer; }
         .ledger-theme .transaction-table td:first-child { white-space: nowrap; }
         .ledger-theme table.text-xs { min-width: 900px; }
         .ledger-theme .compact-ledger .bg-cardBg { padding: 12px; }
@@ -595,8 +596,22 @@
 
         <!-- ================= 頁籤：定存 ================= -->
         <section v-show="activeTab === 'deposits'" class="bg-cardBg border border-borderCol rounded-2xl p-2 sm:p-3 mb-4">
-            <h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年定存記錄</h2>
-            <p class="text-sm text-gray-400 mt-2">尚無定存記錄。</p>
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div><h2 class="text-lg font-semibold text-white">{{ selectedYear }} 年定存記錄－台幣</h2><p class="text-xs text-gray-400 mt-1">所有欄位手動填寫，利率可填 1.50%，日期可填實際日期或「無限期」。</p></div>
+                <button @click="saveDepositRecords" :disabled="isSubmitting || !depositsReady" class="primary-action px-4 py-2 rounded-xl text-sm disabled:opacity-40">儲存定存記錄</button>
+            </div>
+            <p v-if="!depositsReady" role="status" class="text-sm text-amber-300 mb-3">請先部署新版 GAS（版本 8）並重新載入，才能填寫與儲存定存記錄。</p>
+            <div class="cashflow-scroll">
+                <table class="deposit-table cashflow-table w-full text-sm border-collapse" style="min-width:780px" aria-label="台幣定存記錄">
+                    <thead><tr><th v-for="field in depositFields" :key="field.key" class="border border-borderCol">{{ field.label }}</th><th class="border border-borderCol">操作</th></tr></thead>
+                    <tbody><tr v-for="(row,index) in currentDeposits" :key="index">
+                        <td v-for="field in depositFields" :key="field.key" class="border border-borderCol"><input v-model="row[field.key]" :type="field.numeric ? 'number' : 'text'" :min="field.numeric ? 0 : undefined" :step="field.numeric ? 'any' : undefined" :inputmode="field.numeric ? 'decimal' : undefined" :disabled="isSubmitting || !depositsReady" :aria-label="'定存第 ' + (index+1) + ' 筆' + field.label" :placeholder="field.placeholder || '—'" class="w-full min-w-0 bg-transparent p-2 text-center"></td>
+                        <td class="border border-borderCol text-center"><button @click="removeDepositRow(index)" :disabled="isSubmitting || !depositsReady" :aria-label="'移除第 ' + (index+1) + ' 筆定存'" class="text-xs text-accentRed px-2 py-2">移除</button></td>
+                    </tr></tbody>
+                </table>
+            </div>
+            <button @click="addDepositRow" :disabled="isSubmitting || !depositsReady || currentDeposits.length >= 1000" class="mt-3 tab-idle border border-borderCol rounded-xl px-3 py-2 text-sm">新增定存記錄</button>
+            <p class="text-xs text-gray-400 mt-2">新增、修改與移除後請按儲存。利息、日期與狀態皆由你填寫。</p>
         </section>
 
         <!-- ================= 頁籤：配息 ================= -->
@@ -681,11 +696,19 @@
                         <input id="detail-search" type="search" v-model="searchQuery" placeholder="搜尋本月項目名稱或分類…" class="min-w-0 flex-1 bg-transparent text-sm focus:outline-none rounded-lg px-2 py-1">
                         <button v-if="searchQuery" @click="searchQuery = ''" class="shrink-0 text-xs text-accentBlue px-2 py-1 rounded-lg" aria-label="清除明細搜尋">清除</button>
                     </div>
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-cardBg rounded-xl border border-borderCol px-3 py-2">
+                        <p class="text-xs text-gray-400" aria-live="polite">已選 {{ selectedTransactions.length }} 筆<span v-if="selectedTransactions.length">，合計 NT$ {{ formatMoney(selectedTransactionsAmount) }}</span>。全選僅包含目前月份的搜尋結果。</p>
+                        <div class="flex items-center gap-2">
+                            <button v-if="selectedTransactions.length" @click="clearTransactionSelection" :disabled="isSubmitting" class="text-xs text-accentBlue px-3 py-2 rounded-xl border border-borderCol">取消選取</button>
+                            <button @click="deleteSelectedTransactions" :disabled="isSubmitting || !!pendingSave || selectedTransactions.length === 0" class="text-xs text-accentRed bg-cardBg px-3 py-2 rounded-xl border border-borderCol disabled:opacity-40">刪除所選<span v-if="selectedTransactions.length">（{{ selectedTransactions.length }}）</span></button>
+                        </div>
+                    </div>
                     <div class="bg-cardBg rounded-3xl border border-borderCol shadow-xl overflow-hidden">
                         <div class="overflow-x-auto max-h-[520px] overflow-y-auto">
                             <table class="transaction-table w-full text-left border-collapse text-sm">
                                 <thead class="sticky top-0 bg-[#18181f]/95 backdrop-blur-md z-10 border-b border-borderCol">
                                     <tr class="text-gray-400 text-xs">
+                                        <th scope="col" class="p-2 w-12 text-center"><label class="inline-flex items-center justify-center min-w-[36px] min-h-[36px]"><input type="checkbox" :checked="allVisibleTransactionsSelected" :indeterminate="selectedTransactions.length > 0 && !allVisibleTransactionsSelected" @change="toggleAllVisibleTransactions($event.target.checked)" :disabled="isSubmitting || !!pendingSave || filteredTransactions.length === 0" aria-label="全選目前篩選的開銷明細"></label></th>
                                         <th class="p-4 pl-5">日期</th>
                                         <th class="p-4">項目名稱</th>
                                         <th class="p-4">分類</th>
@@ -695,9 +718,10 @@
                                 </thead>
                                 <tbody class="divide-y divide-borderCol/40">
                                     <tr v-if="filteredTransactions.length === 0">
-                                        <td colspan="5" class="text-center py-12 text-gray-500 text-sm">{{ searchQuery.trim() ? '找不到符合搜尋條件的明細。' : '尚無當月開銷紀錄。' }}</td>
+                                        <td colspan="6" class="text-center py-12 text-gray-500 text-sm">{{ searchQuery.trim() ? '找不到符合搜尋條件的明細。' : '尚無當月開銷紀錄。' }}</td>
                                     </tr>
-                                    <tr v-for="item in filteredTransactions" :key="item.id" class="hover:bg-darkBg/50 transition">
+                                    <tr v-for="item in filteredTransactions" :key="item.id" :class="selectedTransactions.some(selected => selected.id === item.id) ? 'bg-emerald-500/5' : ''" class="hover:bg-darkBg/50 transition">
+                                        <td class="p-2 text-center"><label class="inline-flex items-center justify-center min-w-[36px] min-h-[36px]"><input type="checkbox" :checked="selectedTransactions.some(selected => selected.id === item.id)" @change="toggleTransactionSelection(item.id, $event.target.checked)" :disabled="isSubmitting || !!pendingSave" :aria-label="'選取 ' + item.date + ' ' + item.title + '，第 ' + item.id + ' 筆'"></label></td>
                                         <td class="p-4 pl-5 text-gray-400 text-xs font-mono">{{ formatDate(item.date) }}</td>
                                         <td class="p-4 font-medium text-gray-200">{{ item.title }}</td>
                                         <td class="p-4">
@@ -1211,6 +1235,7 @@
         [v-cloak] { display: none; }
     </style>
 
+    <script src="js/deposits/model.js"></script>
     <script src="js/stocks/model.js"></script>
     <script src="js/stocks/calculations.js"></script>
     <script src="js/stocks/import.js"></script>
@@ -1396,6 +1421,7 @@
                         }
                     });
                     for (const year of Object.keys(cashflowRecords.value)) if (!years.includes(Number(year))) years.push(Number(year));
+                    for (const year of Object.keys(depositRecords.value)) if (!years.includes(Number(year))) years.push(Number(year));
                     for (const year of Object.keys(stockRecords.value)) if (!years.includes(Number(year))) years.push(Number(year));
                     return years.sort((a, b) => a - b);
                 });
@@ -1405,7 +1431,7 @@
                 const syncError = ref('');
                 const pendingSave = ref(null);
                 let remoteSnapshot = null;
-                const cleanData = ref({ transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {} });
+                const cleanData = ref({ transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {}, depositRecords: {} });
                 let toastTimer;
                 const clone = value => JSON.parse(JSON.stringify(value));
                 // Automatic blank rows are clean defaults, not edits. Preserve existing baselines.
@@ -1416,7 +1442,7 @@
                 };
                 const canonical = value => JSON.stringify(normalize(value));
                 // 明細維持原本五欄，列號只供目前畫面編輯，不是儲存資料的一部分。
-                const sameDataset = (key, a, b) => key === 'stockRecords' ? canonical(stockSnapshot(a)) === canonical(stockSnapshot(b)) : canonical(key === 'transactions' ? a.map(({ id, ...row }) => row) : a) ===
+                const sameDataset = (key, a, b) => key === 'depositRecords' ? canonical(depositSnapshot(a)) === canonical(depositSnapshot(b)) : key === 'stockRecords' ? canonical(stockSnapshot(a)) === canonical(stockSnapshot(b)) : canonical(key === 'transactions' ? a.map(({ id, ...row }) => row) : a) ===
                     canonical(key === 'transactions' ? b.map(({ id, ...row }) => row) : b);
                 const normalize = value => Array.isArray(value) ? value.map(normalize) :
                     value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])])) : value;
@@ -1431,14 +1457,36 @@
                     const res = await request({ method: 'GET', redirect: 'follow', cache: 'no-store' }, url);
                     if (!res.ok) throw new Error('雲端讀取失敗（HTTP ' + res.status + '）');
                     const data = await res.json();
-                    const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords', ...(data?.protocolVersion >= 6 ? ['cashflowRecords'] : []), ...(data?.protocolVersion >= 7 ? ['stockRecords'] : [])];
-                    if (!data || ![3, 4, 6, 7].includes(data.protocolVersion) || !data.revisions ||
+                    const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords', ...(data?.protocolVersion >= 6 ? ['cashflowRecords'] : []), ...(data?.protocolVersion >= 7 ? ['stockRecords'] : []), ...(data?.protocolVersion >= 8 ? ['depositRecords'] : [])];
+                    if (!data || ![3, 4, 6, 7, 8].includes(data.protocolVersion) || !data.revisions ||
                         !keys.every(field => typeof data.revisions[field] === 'string' &&
                             (field === 'transactions' ? Array.isArray(data[field]) :
                                 data[field] && typeof data[field] === 'object' && !Array.isArray(data[field])))) {
                         throw new Error('後端版本或資料格式不符，請部署新版 GAS 後再同步');
                     }
                     return data;
+                };
+                const depositRecords = ref({});
+                const depositsReady = ref(false);
+                const depositFields = [{key:'amount',label:'金額',numeric:true},{key:'rate',label:'利率',placeholder:'例如 1.50%'},{key:'interest',label:'利息',numeric:true},{key:'date',label:'日期',placeholder:'日期或無限期'},{key:'status',label:'狀態'},{key:'note',label:'備註'}];
+                const depositSnapshot = DepositModel.snapshot;
+                const currentDeposits = computed(() => depositRecords.value[selectedYear.value] ||= DepositModel.emptyYear());
+                const addDepositRow = () => {
+                    if (isSubmitting.value || !depositsReady.value || currentDeposits.value.length >= 1000) return false;
+                    currentDeposits.value.push(DepositModel.emptyRow());return true;
+                };
+                const removeDepositRow = index => {
+                    if (isSubmitting.value || !depositsReady.value || !currentDeposits.value[index]) return false;
+                    const row=currentDeposits.value[index];
+                    if (Object.values(row).some(v=>v!=='' && v!==null) && !confirm(`確定要移除第 ${index+1} 筆定存？按儲存後才會更新試算表。`)) return false;
+                    currentDeposits.value.splice(index,1);
+                    while (currentDeposits.value.length<3) currentDeposits.value.push(DepositModel.emptyRow());
+                    return true;
+                };
+                const saveDepositRecords = () => {
+                    if (!depositsReady.value) {syncError.value='請先部署新版 GAS（版本 8）並重新載入定存資料。';return false;}
+                    try {DepositModel.validateSnapshot(depositRecords.value);} catch (err) {syncError.value=err.message;return false;}
+                    return saveCloud('saveDeposits','depositRecords',depositRecords.value,'定存記錄已確認儲存');
                 };
                 const cashflowRecords = ref({});
                 const cashflowReady = ref(false);
@@ -1812,8 +1860,9 @@
                 }, { deep: true });
 
                 const datasetRefs = () => ({ transactions: transactions.value, summaries: allSummaries.value,
-                    assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value, stockRecords: stockRecords.value });
+                    assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value, stockRecords: stockRecords.value, depositRecords: depositRecords.value });
                 const editableSnapshot = (key, value) => {
+                    if (key === 'depositRecords') return depositSnapshot(value);
                     if (key === 'stockRecords') return stockSnapshot(value);
                     const strip = data => {
                         if (Array.isArray(data)) return data.map(strip);
@@ -1838,7 +1887,7 @@
                     canonical(editableSnapshot(key, datasetRefs()[key])) !== canonical(editableSnapshot(key, cleanData.value[key])))]));
                 const hasUnsavedFunds = computed(() => datasetDirty.fundsRecords.value);
                 const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
-                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息', stockRecords: '股票投資' };
+                const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息', stockRecords: '股票投資', depositRecords: '台幣定存' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
                 const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value || !!stockImportDialog.value?.text.trim());
 
@@ -1856,12 +1905,15 @@
                         stocksReady.value = incomingStocks !== null;
                         if (stocksReady.value) stockRecords.value = incomingStocks;
                         transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
+                        clearTransactionSelection();
                         allSummaries.value = clone(data.summaries);
                         assetsRecords.value = clone(data.assetsRecords);
                         fundInterestReady.value = !data.datasetErrors?.fundsRecords;
                         if (fundInterestReady.value) fundsRecords.value = clone(data.fundsRecords);
                         cashflowReady.value = data.protocolVersion >= 6 && !data.datasetErrors?.cashflowRecords;
                         if (cashflowReady.value) cashflowRecords.value = clone(data.cashflowRecords);
+                        depositsReady.value = data.protocolVersion >= 8 && !data.datasetErrors?.depositRecords;
+                        if (depositsReady.value) depositRecords.value = DepositModel.validateSnapshot(data.depositRecords);
                         remoteSnapshot = clone(data);
                         initCashflow(selectedYear.value);
                         pendingSave.value = null;
@@ -1874,11 +1926,12 @@
                             }
                         }
                         const current = datasetRefs();
-                        for (const key in current) if (!data.datasetErrors?.[key] && (key !== 'stockRecords' || stocksReady.value)) cleanData.value[key] = clone(current[key]);
+                        for (const key in current) if (!data.datasetErrors?.[key] && (key !== 'stockRecords' || stocksReady.value) && (key !== 'depositRecords' || depositsReady.value)) cleanData.value[key] = clone(current[key]);
                         if (activeTab.value === 'stocks' && stocksReady.value) loadStockHistory();
                         showModal.value = false;
                         closeStockImport();
                         syncStatus.value = '雲端資料讀取完成';
+                        if (data.datasetErrors?.depositRecords) syncError.value = '定存資料讀取失敗：' + data.datasetErrors.depositRecords;
                         if (data.datasetErrors?.stockRecords) syncError.value = '股票資料讀取失敗：' + data.datasetErrors.stockRecords;
                         if (data.datasetErrors?.cashflowRecords) syncError.value = '配息資料讀取失敗：' + data.datasetErrors.cashflowRecords;
                         if (data.datasetErrors?.fundsRecords) {
@@ -1903,7 +1956,10 @@
                         if (hasUnsavedFunds.value) { syncError.value = '請先儲存基金投資，再提交配息，確保帶入利息已儲存。'; return false; }
                     }
                     if (key === 'stockRecords' && !stocksReady.value) {syncError.value='股票資料尚未成功載入，請先部署新版 GAS 並重新載入。';return false;}
-                    const expected = key === 'stockRecords' ? stockSnapshot(value) : key === 'cashflowRecords' ? cashflowSnapshot(value) : clone(value);
+                    if (key === 'depositRecords' && !depositsReady.value) {syncError.value='請先部署新版 GAS（版本 8）並載入定存資料。';return false;}
+                    let depositExpected;
+                    if (key === 'depositRecords') {try {depositExpected=DepositModel.validateSnapshot(value);} catch (err) {syncError.value=err.message;return false;}}
+                    const expected = key === 'depositRecords' ? depositExpected : key === 'stockRecords' ? stockSnapshot(value) : key === 'cashflowRecords' ? cashflowSnapshot(value) : clone(value);
                     if (key === 'stockRecords') {try {validateStockInputs(expected);} catch (err) {syncError.value=err.message;return false;}}
                     if (key === 'summaries') {
                         for (const year in expected) for (const month in expected[year]) {
@@ -1961,7 +2017,10 @@
                         }
                         remoteSnapshot[key] = clone(confirmed[key]);
                         remoteSnapshot.revisions[key] = confirmed.revisions[key];
-                        if (key === 'transactions') transactions.value = clone(remoteSnapshot.transactions);
+                        if (key === 'transactions') {
+                            transactions.value = clone(remoteSnapshot.transactions);
+                            clearTransactionSelection();
+                        }
                         cleanData.value[key] = clone(key === 'transactions' ? confirmed[key] : expected);
                         pendingSave.value = null;
                         syncStatus.value = '已重新讀取並確認儲存';
@@ -1976,7 +2035,7 @@
                 const retrySave = () => {
                     const pending = pendingSave.value;
                     if (pending) {
-                        const current = { transactions: transactions.value, summaries: allSummaries.value, assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value, stockRecords: stockRecords.value };
+                        const current = { transactions: transactions.value, summaries: allSummaries.value, assetsRecords: assetsRecords.value, fundsRecords: fundsRecords.value, cashflowRecords: cashflowRecords.value, stockRecords: stockRecords.value, depositRecords: depositRecords.value };
                         return saveCloud(pending.action, pending.key, current[pending.key], pending.message);
                     }
                 };
@@ -2032,6 +2091,49 @@
                     });
                 });
 
+                const selectedTransactionIds = ref([]);
+                const transactionSelectionScope = computed(() => `${selectedYear.value}:${currentMonthNum.value}:${searchQuery.value}`);
+                const selectedTransactionScope = ref('');
+                const selectedTransactions = computed(() => {
+                    if (selectedTransactionScope.value !== transactionSelectionScope.value) return [];
+                    const ids = new Set(selectedTransactionIds.value);
+                    return filteredTransactions.value.filter(item => ids.has(item.id));
+                });
+                const allVisibleTransactionsSelected = computed(() => filteredTransactions.value.length > 0 &&
+                    selectedTransactions.value.length === filteredTransactions.value.length);
+                const selectedTransactionsAmount = computed(() => selectedTransactions.value.reduce((sum,item) => sum + Number(item.amount || 0),0));
+                const clearTransactionSelection = () => {
+                    selectedTransactionIds.value = [];
+                    selectedTransactionScope.value = '';
+                };
+                const toggleTransactionSelection = (id, checked) => {
+                    if (isSubmitting.value || pendingSave.value || !filteredTransactions.value.some(item => item.id === id)) return;
+                    const ids = new Set(selectedTransactions.value.map(item => item.id));
+                    if (checked) ids.add(id); else ids.delete(id);
+                    selectedTransactionScope.value = transactionSelectionScope.value;
+                    selectedTransactionIds.value = Array.from(ids);
+                };
+                const toggleAllVisibleTransactions = checked => {
+                    if (isSubmitting.value || pendingSave.value) return;
+                    selectedTransactionScope.value = transactionSelectionScope.value;
+                    selectedTransactionIds.value = checked ? filteredTransactions.value.map(item => item.id) : [];
+                };
+                watch(transactionSelectionScope, clearTransactionSelection, {flush: 'sync'});
+                const deleteSelectedTransactions = async () => {
+                    if (isSubmitting.value) return false;
+                    if (!remoteSnapshot || pendingSave.value) {
+                        syncError.value = '請先完成雲端載入或處理尚未確認的儲存，再刪除。';return false;
+                    }
+                    // Intersect with the current view before deleting; hidden and other-month rows are excluded.
+                    const selected = selectedTransactions.value;
+                    if (!selected.length) return false;
+                    const ids = new Set(selected.map(item => item.id));
+                    if (!confirm(`確定要刪除 ${selectedYear.value} 年 ${currentMonthNum.value} 月目前篩選結果中選取的 ${selected.length} 筆明細（合計 NT$ ${formatMoney(selectedTransactionsAmount.value)}）嗎？刪除後會同步至試算表。`)) return false;
+                    transactions.value = transactions.value.filter(item => !ids.has(item.id));
+                    clearTransactionSelection();
+                    return syncTransactionsToCloud(`已確認刪除 ${selected.length} 筆開銷明細`);
+                };
+
                 const categoryTotals = computed(() => {
                     const totals = {};
                     monthlyTransactions.value.forEach(item => {
@@ -2054,7 +2156,7 @@
 
                 const saveAllSummaries = () => saveCloud('saveSummary', 'summaries', allSummaries.value, `${selectedYear.value} 年摘要已確認儲存`);
                 const saveAssetsRecord = () => saveCloud('saveAssets', 'assetsRecords', assetsRecords.value, `${currentYM.value} 資產紀錄已確認儲存`);
-                const syncTransactionsToCloud = () => saveCloud('saveTransactions', 'transactions', transactions.value, '開銷明細已確認儲存');
+                const syncTransactionsToCloud = (message = '開銷明細已確認儲存') => saveCloud('saveTransactions', 'transactions', transactions.value, message);
 
                 const saveTransaction = async () => {
                     if (isSubmitting.value) return;
@@ -2108,9 +2210,12 @@
                 };
 
                 return {
+                    depositRecords, depositsReady, depositFields, currentDeposits, addDepositRow, removeDepositRow, saveDepositRecords,
                     cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
                     stockImportDialog, openStockImport, closeStockImport, trapStockImportFocus, previewStockImport, applyStockImport, stocksReady, saveStocksRecord, stockTrackingPolicy, stockHistoricalYears, openStocksTab, activeTab, activeStockCode, activeStockView, stockCodes, stockRecords, isStockDerivedField, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockCumulativeTotals, stockPortfolioRefundTotal, stockPortfolioSections, previousStockPortfolio, previousStockYear, stockDisplayRows, stockManualDisplayRows, stockRegularAveragePrice, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDividendCash, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
                     form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
+                    selectedTransactions, selectedTransactionsAmount, allVisibleTransactionsSelected,
+                    toggleTransactionSelection, toggleAllVisibleTransactions, clearTransactionSelection, deleteSelectedTransactions,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
                     hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,
                     formatDate, formatMoney, saveAllSummaries, fetchData,
