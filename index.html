@@ -268,12 +268,15 @@
                     <div>
                         <label class="block text-xs font-medium text-gray-400 mb-1.5">分類標籤</label>
                         <select v-model="form.category" class="w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue text-white transition cursor-pointer">
-                            <option value="生活開銷">生活開銷</option>
-                            <option value="家用支出">家用支出</option>
-                            <option value="信用卡費">信用卡費</option>
-                            <option value="保險開銷">保險開銷</option>
-                            <option value="旅遊代墊">旅遊代墊</option>
+                            <option value="刷卡">刷卡</option>
+                            <option value="酒類">酒類</option>
+                            <option value="電玩">電玩</option>
+                            <option value="3C產品">3C產品</option>
                             <option value="其它">其它</option>
+                            <option value="旅遊">旅遊</option>
+                            <option value="約會">約會</option>
+                            <option value="衣物">衣物</option>
+                            <option v-if="form.category && !expenseCategories.includes(form.category)" :value="form.category">{{ form.category }}（原有分類）</option>
                         </select>
                     </div>
                     <div class="flex gap-3 pt-3">
@@ -286,6 +289,45 @@
                     </div>
                 </form>
             </div>
+        </div>
+
+        <!-- ================= 新增 / 編輯固定開銷視窗 ================= -->
+        <div v-if="fixedExpenseForm" class="fixed inset-0 bg-slate-900/35 z-40 flex items-center justify-center p-4 backdrop-blur-md" @click.self="closeFixedExpenseForm" @keydown.esc.stop.prevent="closeFixedExpenseForm" @keydown.tab="trapFixedExpenseFocus">
+            <section role="dialog" aria-modal="true" aria-labelledby="fixed-expense-dialog-title" aria-describedby="fixed-expense-dialog-description" class="entry-dialog bg-cardBg w-full max-w-md max-h-[90dvh] overflow-y-auto p-6 sm:p-7 rounded-3xl border border-borderCol shadow-2xl relative">
+                <div class="flex justify-between items-center mb-5 border-b border-borderCol pb-4">
+                    <h2 id="fixed-expense-dialog-title" class="text-base font-semibold flex items-center gap-2.5">
+                        <span class="bg-accentBlue/10 text-accentBlue w-8 h-8 rounded-xl flex items-center justify-center text-sm"><i aria-hidden="true" :class="fixedExpenseEditingId ? 'fa-solid fa-pen-to-square' : 'fa-solid fa-circle-plus'"></i></span>
+                        {{ fixedExpenseEditingId ? '編輯固定開銷' : '新增固定開銷' }}
+                    </h2>
+                    <button type="button" @click="closeFixedExpenseForm" aria-label="關閉固定開銷視窗" class="w-8 h-8 rounded-xl bg-darkBg hover:bg-borderCol text-gray-400 flex items-center justify-center transition"><i aria-hidden="true" class="fa-solid fa-xmark text-sm"></i></button>
+                </div>
+                <p id="fixed-expense-dialog-description" class="text-xs text-gray-400 mb-4">{{ fixedExpenseForm.month }} 的固定開銷，僅記錄於本月。確認後會直接儲存至試算表。</p>
+                <form @submit.prevent="submitFixedExpenseForm" class="space-y-4">
+                    <fieldset :disabled="isSubmitting || !!pendingSave" class="space-y-4 border-0 p-0 m-0 min-w-0">
+                    <label class="block text-xs font-medium text-gray-400">日期<input v-model="fixedExpenseForm.date" type="date" :min="fixedExpenseForm.month + '-01'" :max="fixedExpenseMonthLastDate" @click="$event.target.showPicker && $event.target.showPicker()" required aria-label="固定開銷日期" class="block mt-1.5 w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue cursor-pointer"></label>
+                    <label class="block text-xs font-medium text-gray-400">項目名稱<input id="fixed-expense-title-input" v-model="fixedExpenseForm.title" required maxlength="200" aria-label="固定開銷項目名稱" class="block mt-1.5 w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue" placeholder="例如：房租、電話費"></label>
+                    <div class="mt-2.5 space-y-2">
+                        <div v-if="fixedCommonItems.length" class="flex flex-wrap gap-1.5" aria-label="固定開銷常用標籤">
+                            <div v-for="item in fixedCommonItems" :key="item" class="group relative inline-flex items-center bg-darkBg hover:bg-borderCol/80 border border-borderCol text-gray-300 rounded-lg text-xs font-medium transition">
+                                <button type="button" @click="appendFixedItemTitle(item)" class="px-2.5 py-1 text-left cursor-pointer flex items-center gap-1"><span class="text-accentBlue">+</span> {{ item }}</button>
+                                <button type="button" @click="removeFixedCustomItem(item)" :aria-label="'刪除標籤：' + item" class="pr-2 pl-0.5 text-gray-500 hover:text-rose-400 transition cursor-pointer" title="刪除此標籤"><i aria-hidden="true" class="fa-solid fa-xmark text-[10px]"></i></button>
+                            </div>
+                        </div>
+                        <div class="flex gap-2 pt-1">
+                            <input type="text" v-model="fixedNewCustomItem" @keydown.enter.prevent="addFixedCustomItem" maxlength="200" aria-label="新增固定開銷常用標籤" placeholder="新增常用項目名稱..." class="min-w-0 flex-1 bg-darkBg border border-borderCol rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-accentBlue">
+                            <button type="button" @click="addFixedCustomItem" class="bg-accentBlue/20 hover:bg-accentBlue/30 text-accentBlue border border-accentBlue/40 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer">新增標籤</button>
+                        </div>
+                    </div>
+                    <label class="block text-xs font-medium text-gray-400">金額 (NT$)<input v-model="fixedExpenseForm.amount" type="number" min="0.01" step="0.01" required aria-label="固定開銷金額" class="block mt-1.5 w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-accentBlue" placeholder="0"></label>
+                    <label class="block text-xs font-medium text-gray-400">分類標籤<input value="固定開銷" readonly aria-label="固定開銷分類" class="block mt-1.5 w-full bg-darkBg border border-borderCol rounded-xl px-3.5 py-2.5 text-sm"></label>
+                    </fieldset>
+                    <p v-if="fixedExpenseFormError" role="alert" class="text-xs text-rose-400">{{ fixedExpenseFormError }}</p>
+                    <div class="flex gap-3 pt-3">
+                        <button type="button" @click="closeFixedExpenseForm" class="w-1/2 bg-darkBg hover:bg-borderCol border border-borderCol transition text-gray-300 font-medium py-2.5 rounded-xl text-sm cursor-pointer">取消</button>
+                        <button type="submit" :disabled="isSubmitting || !fixedExpensesReady" class="primary-action w-1/2 transition text-white font-medium py-2.5 rounded-xl text-sm shadow-lg cursor-pointer">{{ isSubmitting ? '儲存中…' : pendingSave ? '重試儲存' : fixedExpenseEditingId ? '確認修改' : '確認新增' }}</button>
+                    </div>
+                </form>
+            </section>
         </div>
 
         <!-- ================= 頂部標題與年份/月份切換列 ================= -->
@@ -662,7 +704,7 @@
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.salary" placeholder="0" class="w-24 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.insurance" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.extraIncome" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
-                                <td class="p-3 border-r border-borderCol bg-rose-500/5 text-rose-400 font-bold">{{ formatMoney(currentSummary.livingExpense) }}</td>
+                                <td class="p-3 border-r border-borderCol bg-rose-500/5 text-rose-400 font-bold">{{ formatMoney(getLivingExpenseTotalForMonth(selectedYear, currentMonthNum)) }}</td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.insuranceExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.otherExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentSummary.familyExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
@@ -676,6 +718,26 @@
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- 左側：開銷清單 (佔 2 欄) -->
                 <div class="lg:col-span-2 space-y-4">
+                    <section class="bg-cardBg border border-borderCol rounded-2xl p-3 sm:p-4" aria-labelledby="fixed-expenses-title">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                            <h2 id="fixed-expenses-title" class="font-semibold text-base">{{ selectedYear }} 年 {{ currentMonthNum }} 月固定開銷</h2>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button @click="openFixedExpenseForm()" :disabled="isSubmitting || !fixedExpensesReady || !!pendingSave" class="primary-action bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 transition text-white px-3.5 py-2 rounded-xl text-xs font-medium shadow-md shadow-rose-500/20 flex items-center gap-1.5 cursor-pointer"><i aria-hidden="true" class="fa-solid fa-circle-plus"></i> 新增固定開銷</button>
+                                <button v-if="fixedExpensesMigrationPending || dirtySections.includes('transactions')" @click="saveFixedExpenses" :disabled="isSubmitting || !fixedExpensesReady" class="primary-action rounded-xl px-3 py-2 text-xs">儲存固定開銷</button>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-400 mb-3">各月份獨立新增、編輯與刪除，不會自動帶入其他月份。分類為「固定開銷」的明細會顯示於此，並計入生活開銷；確認新增、修改或刪除後會直接儲存。</p>
+                        <p v-if="!fixedExpensesReady" role="status" class="text-xs text-amber-300 mb-2">請部署新版 GAS（版本 11）並重新載入，固定開銷將與一般明細共用「明細」工作表。</p>
+                        <p v-if="fixedExpensesMigrationPending" role="status" class="text-xs text-amber-300 mb-2">舊固定設定已轉為截至本月的獨立明細，未來起始項目保留首月一筆。請按「儲存固定開銷」確認轉存；舊工作表會保留。</p>
+                        <div class="overflow-x-auto">
+                            <table class="w-full border-collapse text-sm" style="min-width:520px" aria-label="本月固定開銷">
+                                <thead><tr><th class="p-2 text-left">日期</th><th class="p-2 text-left">項目</th><th class="p-2 text-left">分類</th><th class="p-2 text-right">金額</th><th class="p-2 text-center">操作</th></tr></thead>
+                                <tbody><tr v-if="!currentFixedExpenses.length"><td colspan="5" class="p-4 text-center text-gray-400">本月尚無固定開銷，點「新增固定開銷」開始設定。</td></tr>
+                                    <tr v-for="item in currentFixedExpenses" :key="item.id" class="border-t border-borderCol"><td class="p-2 font-mono text-xs">{{ item.date }}</td><td class="p-2">{{ item.title }}</td><td class="p-2 text-xs">{{ item.category }}</td><td class="p-2 text-right font-mono">NT$ {{ formatMoney(item.amount) }}</td><td class="p-2 text-center whitespace-nowrap"><button @click="openFixedExpenseForm(item)" :disabled="isSubmitting || !fixedExpensesReady || !!pendingSave" class="text-accentBlue text-xs px-2 py-2">編輯</button><button @click="deleteAndSaveFixedExpense(item.id)" :disabled="isSubmitting || !fixedExpensesReady || !!pendingSave" class="text-accentRed text-xs px-2 py-2">刪除</button></td></tr>
+                                </tbody><tfoot><tr class="border-t border-borderCol font-semibold"><th colspan="3" class="p-2 text-right">固定開銷合計</th><td class="p-2 text-right font-mono">NT$ {{ formatMoney(currentFixedExpenseTotal) }}</td><td></td></tr></tfoot>
+                            </table>
+                        </div>
+                    </section>
                     <div class="section-toolbar flex justify-between items-center">
                         <h2 class="font-semibold text-gray-200 text-base flex items-center gap-2">
                             <span>{{ selectedYear }} 年 {{ currentMonthNum }} 月份開銷明細</span>
@@ -795,7 +857,7 @@
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].salary" placeholder="0" class="w-24 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].insurance" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].extraIncome" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
-                                <td class="p-3 border-r border-borderCol bg-rose-500/5 text-rose-400 font-bold">{{ formatMoney(currentYearSummaries[m].livingExpense) }}</td>
+                                <td class="p-3 border-r border-borderCol bg-rose-500/5 text-rose-400 font-bold">{{ formatMoney(getLivingExpenseTotalForMonth(selectedYear, m)) }}</td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].insuranceExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].otherExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
                                 <td class="p-3 border-r border-borderCol"><input type="number" v-model.number="currentYearSummaries[m].familyExpense" placeholder="0" class="w-20 bg-darkBg border border-borderCol rounded-xl px-2.5 py-1.5 text-center text-xs focus:border-accentBlue focus:outline-none transition"></td>
@@ -1458,13 +1520,103 @@
                     if (!res.ok) throw new Error('雲端讀取失敗（HTTP ' + res.status + '）');
                     const data = await res.json();
                     const keys = key ? [key] : ['transactions', 'summaries', 'assetsRecords', 'fundsRecords', ...(data?.protocolVersion >= 6 ? ['cashflowRecords'] : []), ...(data?.protocolVersion >= 7 ? ['stockRecords'] : []), ...(data?.protocolVersion >= 8 ? ['depositRecords'] : [])];
-                    if (!data || ![3, 4, 6, 7, 8].includes(data.protocolVersion) || !data.revisions ||
+                    if (!data || ![3, 4, 6, 7, 8, 9, 10, 11].includes(data.protocolVersion) || !data.revisions ||
                         !keys.every(field => typeof data.revisions[field] === 'string' &&
                             (field === 'transactions' ? Array.isArray(data[field]) :
                                 data[field] && typeof data[field] === 'object' && !Array.isArray(data[field])))) {
                         throw new Error('後端版本或資料格式不符，請部署新版 GAS 後再同步');
                     }
                     return data;
+                };
+                const fixedExpensesReady = ref(false);
+                const fixedExpensesMigrationPending = ref(false);
+                const fixedExpenseMonth = computed(() => `${selectedYear.value}-${String(currentMonthNum.value).padStart(2,'0')}`);
+                const currentFixedExpenses = computed(() => transactions.value.filter(row => row.category==='固定開銷' && String(row.date).slice(0,7)===fixedExpenseMonth.value).sort((a,b)=>a.date.localeCompare(b.date)));
+                const fixedExpenseMonthLastDate = computed(() => fixedExpenseMonth.value+'-'+new Date(selectedYear.value,currentMonthNum.value,0).getDate());
+                const currentFixedExpenseTotal = computed(() => currentFixedExpenses.value.reduce((sum,row)=>sum+row.amount,0));
+                const fixedExpenseForm = ref(null);
+                const fixedExpenseEditingId = ref('');
+                const fixedExpenseFormError = ref('');
+                let fixedExpenseFormBaseline = '';
+                let fixedExpenseTrigger = null;
+                let fixedExpenseAwaitingSave = false;
+                const trapFixedExpenseFocus = event => {
+                    const controls=Array.from(event.currentTarget.querySelectorAll('button:not([disabled]), input:not([disabled])'));
+                    const first=controls[0],last=controls.at(-1);
+                    if (event.shiftKey && event.target===first) {event.preventDefault();last?.focus();}
+                    else if (!event.shiftKey && event.target===last) {event.preventDefault();first?.focus();}
+                };
+                const restoreFixedExpenseFocus = () => {fixedExpenseTrigger?.focus();fixedExpenseTrigger=null;};
+                const hasUnsavedFixedExpenseForm = computed(() => !!fixedExpenseForm.value && JSON.stringify(fixedExpenseForm.value)!==fixedExpenseFormBaseline);
+                const openFixedExpenseForm = item => {
+                    if (isSubmitting.value || !fixedExpensesReady.value || pendingSave.value) return false;
+                    if (hasUnsavedFixedExpenseForm.value && !confirm('有尚未儲存的固定開銷修改，確定要放棄？')) return false;
+                    if (!fixedExpenseForm.value && typeof document!=='undefined') fixedExpenseTrigger=document.activeElement;
+                    fixedExpenseEditingId.value=item?.id || '';
+                    fixedExpenseForm.value={month:fixedExpenseMonth.value,title:item?.title || '',amount:item?.amount ?? '',date:item?.date || fixedExpenseMonth.value+'-01'};
+                    fixedExpenseFormBaseline=JSON.stringify(fixedExpenseForm.value);fixedExpenseFormError.value='';
+                    Promise.resolve().then(()=>{if (typeof document!=='undefined') document.getElementById('fixed-expense-title-input')?.focus();});
+                    return true;
+                };
+                const finishFixedExpenseForm = () => {
+                    fixedExpenseForm.value=null;fixedExpenseEditingId.value='';fixedExpenseFormError.value='';fixedExpenseAwaitingSave=false;restoreFixedExpenseFocus();
+                };
+                const closeFixedExpenseForm = () => {
+                    if (isSubmitting.value) return false;
+                    if (hasUnsavedFixedExpenseForm.value && !confirm('確定放棄尚未儲存的固定開銷修改？')) return false;
+                    finishFixedExpenseForm();return true;
+                };
+                const refreshLivingExpenseSummaries = () => {
+                    for (const y in allSummaries.value) for (const m in allSummaries.value[y]) {
+                        allSummaries.value[y][m].livingExpense=getLivingExpenseTotalForMonth(Number(y),Number(m));
+                    }
+                };
+                const applyFixedExpenseForm = ({keepOpen=false}={}) => {
+                    if (!fixedExpenseForm.value || isSubmitting.value || !fixedExpensesReady.value || pendingSave.value) return false;
+                    const {month,title,amount,date}=fixedExpenseForm.value;
+                    if (month!==fixedExpenseMonth.value) {fixedExpenseFormError.value='目前月份已變更，請取消後重新開啟設定。';return false;}
+                    const price=Number(amount);
+                    if (!String(title).trim() || !Number.isFinite(price) || price<=0 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0,7)!==month || date>fixedExpenseMonthLastDate.value || date<month+'-01') {
+                        fixedExpenseFormError.value='請填寫項目、正數金額及本月有效日期。';return false;
+                    }
+                    const id=fixedExpenseEditingId.value || 'fixed_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10);
+                    const row={id,date,title:String(title).trim(),amount:price,category:'固定開銷',type:'expense'};
+                    const index=transactions.value.findIndex(t=>t.id===id);
+                    if (fixedExpenseEditingId.value && !currentFixedExpenses.value.some(t=>t.id===id)) {fixedExpenseFormError.value='此筆明細已變更，請重新開啟。';return false;}
+                    if (index<0) transactions.value.push(row);else transactions.value.splice(index,1,row);
+                    if (keepOpen) {fixedExpenseEditingId.value=id;fixedExpenseFormError.value='';}
+                    else finishFixedExpenseForm();
+                    refreshLivingExpenseSummaries();return true;
+                };
+                const submitFixedExpenseForm = async () => {
+                    if (isSubmitting.value || !fixedExpensesReady.value) return false;
+                    if (pendingSave.value) {
+                        if (!fixedExpenseAwaitingSave || pendingSave.value.key!=='transactions') return false;
+                        const saved=await retrySave();
+                        if (!saved && fixedExpenseForm.value) fixedExpenseFormError.value=syncError.value;
+                        return saved;
+                    }
+                    if (!applyFixedExpenseForm({keepOpen:true})) return false;
+                    fixedExpenseAwaitingSave=true;
+                    const saved=await saveCloud('saveTransactions','transactions',transactions.value,'固定開銷已確認儲存');
+                    if (!saved && fixedExpenseForm.value) fixedExpenseFormError.value=syncError.value || '尚未確認儲存成功，請重試儲存。';
+                    return saved;
+                };
+                const deleteAndSaveFixedExpense = async id => {
+                    if (!deleteFixedExpense(id)) return false;
+                    return saveCloud('saveTransactions','transactions',transactions.value,'固定開銷已確認刪除');
+                };
+                const deleteFixedExpense = id => {
+                    if (isSubmitting.value || !fixedExpensesReady.value || pendingSave.value) return false;
+                    const item=currentFixedExpenses.value.find(row=>row.id===id);
+                    if (!item || !confirm(`確定刪除 ${fixedExpenseMonth.value} 的「${item.title}」？確認後會直接儲存。`)) return false;
+                    transactions.value=transactions.value.filter(row=>row.id!==id);
+                    refreshLivingExpenseSummaries();return true;
+                };
+                const saveFixedExpenses = () => {
+                    if (!fixedExpensesReady.value) {syncError.value='請先部署新版 GAS（版本 11）並載入明細。';return false;}
+                    if (hasUnsavedFixedExpenseForm.value) {fixedExpenseFormError.value='請先套用或取消編輯中的設定，再儲存固定開銷。';return false;}
+                    return saveCloud('saveTransactions','transactions',transactions.value,'開銷明細（含固定開銷）已確認儲存');
                 };
                 const depositRecords = ref({});
                 const depositsReady = ref(false);
@@ -1530,11 +1682,12 @@
                 const isEditing = ref(false)
                 const editingId = ref(null)
 
+                const expenseCategories = ['刷卡','固定開銷','酒類','電玩','3C產品','其它','旅遊','約會','衣物'];
                 const form = ref({
                     date: new Date().toISOString().slice(0, 10),
                     title: '',
                     amount: '',
-                    category: '生活開銷'
+                    category: '其它'
                 })
 
                 const formBaseline = ref(clone(form.value));
@@ -1565,6 +1718,36 @@
                     localStorage.setItem('budget_common_items', JSON.stringify(commonItems.value));
                 };
 
+                // 固定開銷使用獨立標籤清單，首次使用時不預填項目。
+                const fixedCommonItems = ref([]);
+                const fixedNewCustomItem = ref('');
+                try {
+                    const saved=JSON.parse(localStorage.getItem('budget_fixed_common_items') || '[]');
+                    if (Array.isArray(saved)) fixedCommonItems.value=[...new Set(saved.filter(item=>typeof item==='string' && item.trim() && item.trim().length<=200).map(item=>item.trim()))];
+                } catch (_) { /* Invalid or unavailable local storage leaves an empty list. */ }
+                const persistFixedCommonItems = () => {
+                    try {localStorage.setItem('budget_fixed_common_items',JSON.stringify(fixedCommonItems.value));}
+                    catch (_) {fixedExpenseFormError.value='標籤暫時無法保存在此瀏覽器，仍可使用本次新增的標籤。';}
+                };
+                const appendFixedItemTitle = item => {
+                    if (!fixedExpenseForm.value || isSubmitting.value || pendingSave.value) return;
+                    const title=fixedExpenseForm.value.title.trim();
+                    if (title.split('、').some(part=>part.trim()===item)) return;
+                    fixedExpenseForm.value.title=title ? `${title.replace(/、\s*$/, '')}、${item}` : item;
+                };
+                const addFixedCustomItem = () => {
+                    if (isSubmitting.value || pendingSave.value) return;
+                    const item=fixedNewCustomItem.value.trim();
+                    if (!item || item.length>200) return;
+                    if (!fixedCommonItems.value.includes(item)) {fixedCommonItems.value.push(item);persistFixedCommonItems();}
+                    fixedNewCustomItem.value='';
+                };
+                const removeFixedCustomItem = item => {
+                    if (isSubmitting.value || pendingSave.value) return;
+                    fixedCommonItems.value=fixedCommonItems.value.filter(label=>label!==item);
+                    persistFixedCommonItems();
+                };
+
                 // 日期格式化輔助：確保帶入 <input type="date"> 時為 YYYY-MM-DD
                 const formatDateForInput = (dateStr) => {
                     if (!dateStr) return new Date().toISOString().slice(0, 10);
@@ -1582,7 +1765,7 @@
                         date: new Date().toISOString().slice(0, 10),
                         title: '',
                         amount: '',
-                        category: '生活開銷'
+                        category: '其它'
                     };
                     formBaseline.value = clone(form.value);
                     showModal.value = true;
@@ -1839,17 +2022,19 @@
                 const livingExpenseByMonth = computed(() => {
                     const totals = {};
                     for (const item of transactions.value) {
-                        if (item.date && item.category === '生活開銷') {
+                        if (item.date && (item.category==='生活開銷' || expenseCategories.includes(item.category))) {
                             const ym = String(item.date).slice(0, 7);
                             totals[ym] = (totals[ym] || 0) + Number(item.amount || 0);
                         }
                     }
                     return totals;
                 });
-                const getLivingExpenseTotalForMonth = (year, month) =>
-                    livingExpenseByMonth.value[`${year}-${String(month).padStart(2, '0')}`] || 0;
+                const getLivingExpenseTotalForMonth = (year, month) => {
+                    const ym=`${year}-${String(month).padStart(2,'0')}`;
+                    return livingExpenseByMonth.value[ym] || 0;
+                };
 
-                watch(transactions, () => {
+                watch([transactions], () => {
                     for (const y in allSummaries.value) {
                         for (let m = 1; m <= 12; m++) {
                             if (allSummaries.value[y][m]) {
@@ -1889,7 +2074,7 @@
                 const dirtySections = computed(() => Object.keys(datasetDirty).filter(key => datasetDirty[key].value));
                 const sectionLabels = { transactions: '開銷明細', summaries: '年度收支', assetsRecords: '資產負債', fundsRecords: '基金投資', cashflowRecords: '現金流配息', stockRecords: '股票投資', depositRecords: '台幣定存' };
                 const dirtySectionNames = computed(() => dirtySections.value.map(key => sectionLabels[key]));
-                const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value || !!stockImportDialog.value?.text.trim());
+                const hasUnsavedChanges = computed(() => dirtySections.value.length > 0 || hasUnsavedForm.value || !!pendingSave.value || !!stockImportDialog.value?.text.trim() || hasUnsavedFixedExpenseForm.value);
 
                 const fetchData = async () => {
                     if (isSubmitting.value) return;
@@ -1904,7 +2089,7 @@
                         if (incomingStocks) validateStockInputs(incomingStocks);
                         stocksReady.value = incomingStocks !== null;
                         if (stocksReady.value) stockRecords.value = incomingStocks;
-                        transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
+                        if (!data.datasetErrors?.transactions) transactions.value = clone(data.transactions).map((t, idx) => ({ ...t, id: t.id || idx + 1 }));
                         clearTransactionSelection();
                         allSummaries.value = clone(data.summaries);
                         assetsRecords.value = clone(data.assetsRecords);
@@ -1914,6 +2099,11 @@
                         if (cashflowReady.value) cashflowRecords.value = clone(data.cashflowRecords);
                         depositsReady.value = data.protocolVersion >= 8 && !data.datasetErrors?.depositRecords;
                         if (depositsReady.value) depositRecords.value = DepositModel.validateSnapshot(data.depositRecords);
+                        fixedExpensesReady.value = data.protocolVersion >= 11 && data.fixedExpenseStorage === 'transactions' && !data.datasetErrors?.transactions;
+                        if (fixedExpensesReady.value) {
+                            fixedExpensesMigrationPending.value=!!data.fixedExpensesMigrationPending;
+                            fixedExpenseForm.value = null;fixedExpenseEditingId.value='';fixedExpenseFormError.value='';
+                        }
                         remoteSnapshot = clone(data);
                         initCashflow(selectedYear.value);
                         pendingSave.value = null;
@@ -1931,6 +2121,7 @@
                         showModal.value = false;
                         closeStockImport();
                         syncStatus.value = '雲端資料讀取完成';
+                        if (data.datasetErrors?.transactions) syncError.value = '開銷明細讀取失敗：' + data.datasetErrors.transactions;
                         if (data.datasetErrors?.depositRecords) syncError.value = '定存資料讀取失敗：' + data.datasetErrors.depositRecords;
                         if (data.datasetErrors?.stockRecords) syncError.value = '股票資料讀取失敗：' + data.datasetErrors.stockRecords;
                         if (data.datasetErrors?.cashflowRecords) syncError.value = '配息資料讀取失敗：' + data.datasetErrors.cashflowRecords;
@@ -1959,13 +2150,15 @@
                     if (key === 'depositRecords' && !depositsReady.value) {syncError.value='請先部署新版 GAS（版本 8）並載入定存資料。';return false;}
                     let depositExpected;
                     if (key === 'depositRecords') {try {depositExpected=DepositModel.validateSnapshot(value);} catch (err) {syncError.value=err.message;return false;}}
+                    if (key === 'transactions' && remoteSnapshot.protocolVersion >= 9 && !fixedExpensesReady.value) {syncError.value='請先部署新版 GAS（版本 11）並重新載入明細。';return false;}
+                    if (key === 'summaries' && ((remoteSnapshot.protocolVersion >= 9 && !fixedExpensesReady.value) || datasetDirty.transactions.value || fixedExpensesMigrationPending.value)) {syncError.value='請先成功載入並儲存開銷明細（含固定開銷），再儲存年度摘要。';return false;}
                     const expected = key === 'depositRecords' ? depositExpected : key === 'stockRecords' ? stockSnapshot(value) : key === 'cashflowRecords' ? cashflowSnapshot(value) : clone(value);
                     if (key === 'stockRecords') {try {validateStockInputs(expected);} catch (err) {syncError.value=err.message;return false;}}
                     if (key === 'summaries') {
                         for (const year in expected) for (const month in expected[year]) {
                             const row = expected[year][month];
                             row.month = Number(month);
-                            for (const field of ['salary', 'insurance', 'extraIncome', 'livingExpense', 'insuranceExpense', 'otherExpense', 'familyExpense']) row[field] = Number(row[field] || 0);
+                            for (const field of ['salary', 'insurance', 'extraIncome', 'livingExpense', 'insuranceExpense', 'otherExpense', 'familyExpense']) row[field] = field === 'livingExpense' ? getLivingExpenseTotalForMonth(Number(year),Number(month)) : Number(row[field] || 0);
                         }
                     }
                     if (key === 'assetsRecords') {
@@ -1985,10 +2178,11 @@
                         let confirmed = null;
                         // Retry/no-change checks avoid resending an uncertain write. Normal saves
                         // rely on the backend's locked revision check and need only POST + GET.
-                        if (isRetry || sameDataset(key, remoteSnapshot[key], expected)) {
+                        const mustMigrateFixed=key==='transactions' && fixedExpensesMigrationPending.value;
+                        if (isRetry || (!mustMigrateFixed && sameDataset(key, remoteSnapshot[key], expected))) {
                             const before = await readCloud(key);
                             if (before.datasetErrors?.[key]) throw new Error(before.datasetErrors[key]);
-                            if (sameDataset(key, before[key], expected)) confirmed = before;
+                            if (sameDataset(key, before[key], expected) && !(key==='transactions' && before.fixedExpensesMigrationPending)) confirmed = before;
                             else if (!sameDataset(key, before[key], remoteSnapshot[key]) &&
                                 !(previousPending && sameDataset(key, before[key], previousPending.value))) {
                                 throw new Error('雲端資料已被其他裝置修改，請先保留修改內容再重新載入');
@@ -2007,13 +2201,20 @@
                             for (let attempt = 0; attempt < 4; attempt++) {
                                 const data = await readCloud(key);
                                 if (data.datasetErrors?.[key]) throw new Error(data.datasetErrors[key]);
-                                if (sameDataset(key, data[key], expected)) { confirmed = data; break; }
+                                if (sameDataset(key, data[key], expected)) {
+                                    if (key==='transactions' && data.fixedExpensesMigrationPending) throw new Error('固定開銷已送出，但轉存尚未完成，請重試儲存。');
+                                    confirmed = data; break;
+                                }
                                 if (!sameDataset(key, data[key], remoteSnapshot[key])) {
                                     throw new Error('雲端資料已被其他裝置修改，請先保留修改內容再重新載入');
                                 }
                                 if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
                             }
                             if (!confirmed) throw new Error('送出後的雲端資料與修改不一致，尚無法確認儲存成功');
+                        }
+                        if (key==='transactions') {
+                            fixedExpensesMigrationPending.value=!!confirmed.fixedExpensesMigrationPending;
+                            remoteSnapshot.fixedExpensesMigrationPending=fixedExpensesMigrationPending.value;
                         }
                         remoteSnapshot[key] = clone(confirmed[key]);
                         remoteSnapshot.revisions[key] = confirmed.revisions[key];
@@ -2023,6 +2224,7 @@
                         }
                         cleanData.value[key] = clone(key === 'transactions' ? confirmed[key] : expected);
                         pendingSave.value = null;
+                        if (key==='transactions' && fixedExpenseAwaitingSave) finishFixedExpenseForm();
                         syncStatus.value = '已重新讀取並確認儲存';
                         toastMessage.value = message;
                         showSuccessToast.value = true;
@@ -2078,7 +2280,7 @@
                     const m = String(currentMonthNum.value).padStart(2, '0');
                     const prefix = `${y}-${m}`;
                     return transactions.value
-                        .filter(item => item.date && String(item.date).startsWith(prefix))
+                        .filter(item => item.category!=='固定開銷' && item.date && String(item.date).startsWith(prefix))
                         .sort((a, b) => new Date(b.date) - new Date(a.date));
                 })
 
@@ -2136,7 +2338,7 @@
 
                 const categoryTotals = computed(() => {
                     const totals = {};
-                    monthlyTransactions.value.forEach(item => {
+                    [...monthlyTransactions.value,...currentFixedExpenses.value].forEach(item => {
                         const cat = item.category || '其它';
                         totals[cat] = (totals[cat] || 0) + Number(item.amount || 0);
                     });
@@ -2210,15 +2412,18 @@
                 };
 
                 return {
+                    fixedExpensesReady, fixedExpensesMigrationPending, currentFixedExpenses, currentFixedExpenseTotal,
+                    trapFixedExpenseFocus, fixedExpenseMonthLastDate, fixedExpenseForm, fixedExpenseEditingId, fixedExpenseFormError, openFixedExpenseForm, closeFixedExpenseForm, applyFixedExpenseForm, submitFixedExpenseForm, deleteAndSaveFixedExpense, deleteFixedExpense, saveFixedExpenses,
                     depositRecords, depositsReady, depositFields, currentDeposits, addDepositRow, removeDepositRow, saveDepositRecords,
                     cashflowFundInterest, fundInterestReady, hasUnsavedFunds, cashflowRecords, cashflowReady, cashflowColumns, currentCashflow, cashflowMonthTotal, cashflowColumnTotal, cashflowMonthlyTotal, cashflowAnnualTotal, saveCashflowRecord,
                     stockImportDialog, openStockImport, closeStockImport, trapStockImportFocus, previewStockImport, applyStockImport, stocksReady, saveStocksRecord, stockTrackingPolicy, stockHistoricalYears, openStocksTab, activeTab, activeStockCode, activeStockView, stockCodes, stockRecords, isStockDerivedField, stockOverviewGroups, stockOverview, stockPortfolioFields, stockPortfolioRows, stockPortfolioTotals, stockCumulativeTotals, stockPortfolioRefundTotal, stockPortfolioSections, previousStockPortfolio, previousStockYear, stockDisplayRows, stockManualDisplayRows, stockRegularAveragePrice, stockRegularTotals, stockManualTotals, selectedStockMonth, stockMonthlyRows, stockMonthlyTotals, stockRefundAmounts, stockRefundTotal, stockDividendRows, stockDividendTotals, stockDividendCash, stockDateDisplay, stockDateInputValue, openStockDatePicker, stockPurchase, selectedYear, availableYears, currentMonthNum, changeMonth, onYearChange,
-                    form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
+                    fixedCommonItems, fixedNewCustomItem, appendFixedItemTitle, addFixedCustomItem, removeFixedCustomItem,
+                    expenseCategories, form, commonItems, newCustomItem, appendItemTitle, addCustomItem, removeCustomItem,
                     selectedTransactions, selectedTransactionsAmount, allVisibleTransactionsSelected,
                     toggleTransactionSelection, toggleAllVisibleTransactions, clearTransactionSelection, deleteSelectedTransactions,
                     currentYearSummaries, currentSummary, searchQuery, monthlyTransactions, filteredTransactions, categoryTotals,
                     hasUnsavedChanges, hasUnsavedForm, dirtySections, dirtySectionNames,
-                    formatDate, formatMoney, saveAllSummaries, fetchData,
+                    formatDate, formatMoney, getLivingExpenseTotalForMonth, saveAllSummaries, fetchData,
                     isSubmitting, syncStatus, syncError, pendingSave, retrySave, showSuccessToast, toastMessage, showModal,
                     currentYM, currentAssetData, liquidAssetsTotal, investmentTotal, foreignCashTotal, totalAssets, saveAssetsRecord,
                     invEntieUSD_TWD, currJPY_TWD, currUSD_TWD, currHKD_TWD,

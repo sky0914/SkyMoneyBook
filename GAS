@@ -105,13 +105,11 @@ function rows_(ss, name) {
   var sheet = ss.getSheetByName(name);
   return sheet ? sheet.getDataRange().getValues().slice(1) : [];
 }
-function read_(ss, key) {
+function read_(ss, key, expenseLedger) {
   var timezone = ss.getSpreadsheetTimeZone();
-  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {}, depositRecords: {}};
-  if (!key || key === 'transactions') rows_(ss, '明細').forEach(function(r, i) {
-    if (!r[0]) return;
-    result.transactions.push({id: i + 1, date: date_(r[0], ss, timezone), title: String(r[1] || ''), amount: Number(r[2] || 0), category: String(r[3] || ''), type: String(r[4] || 'expense')});
-  });
+  var result = {transactions: [], summaries: {}, assetsRecords: {}, fundsRecords: {}, cashflowRecords: {}, stockRecords: {}, depositRecords: {}, fixedExpenses: {}};
+  if ((!key || key==='transactions' || key==='fixedExpenses') && !expenseLedger) expenseLedger=readExpenseLedger_(ss);
+  if (!key || key==='transactions') result.transactions=expenseLedger.transactions;
   if (!key || key === 'summaries') rows_(ss, '年度摘要').forEach(function(r) {
     if (!r[0] || !r[1]) return;
     var year = String(r[0]).trim(), month = String(Number(r[1]));
@@ -135,11 +133,16 @@ function read_(ss, key) {
   catch (err) { result.datasetErrors.stockRecords = String(err); }
   try { if (!key || key === 'depositRecords') result.depositRecords = readDeposits_(ss); }
   catch (err) { result.datasetErrors.depositRecords = String(err); }
+  if (expenseLedger) {
+    result.fixedExpensesMigrationPending=!!expenseLedger.migrationPending;
+    if (expenseLedger.fixedError) result.datasetErrors.transactions=expenseLedger.fixedError;
+  }
   result.revisions = {};
-  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords','depositRecords']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
-  result.protocolVersion = 8;
+  (key ? [key] : ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords','depositRecords','fixedExpenses']).forEach(function(field) { result.revisions[field] = revision_(result[field]); });
+  result.protocolVersion = 11;
+  result.fixedExpenseStorage = 'transactions';
   if (key) {
-    var selected = {revisions: result.revisions, datasetErrors: result.datasetErrors, protocolVersion: result.protocolVersion};
+    var selected = {revisions: result.revisions, datasetErrors: result.datasetErrors, protocolVersion: result.protocolVersion, fixedExpenseStorage: result.fixedExpenseStorage, fixedExpensesMigrationPending: !!result.fixedExpensesMigrationPending};
     selected[key] = result[key];
     return selected;
   }
@@ -150,7 +153,7 @@ function doGet(e) {
   try {
     lock.waitLock(10000);
     var key = e && e.parameter && e.parameter.dataset;
-    if (key && ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords','depositRecords'].indexOf(key) < 0) throw new Error('Unknown dataset');
+    if (key && ['transactions','summaries','assetsRecords','fundsRecords','cashflowRecords','stockRecords','depositRecords','fixedExpenses'].indexOf(key) < 0) throw new Error('Unknown dataset');
     return json_(read_(SpreadsheetApp.openById(BOOK_ID), key));
   } catch (err) { return json_({status: 'error', message: String(err)}); }
   finally { if (lock.hasLock()) lock.releaseLock(); }
@@ -179,6 +182,7 @@ function replaceRows_(ss, name, rows) {
     sheet.getRange(1,4,rows.length,1).setNumberFormat('@');
     sheet.getRange(1,6,rows.length,3).setNumberFormat('@');
   }
+  if (name === '明細') sheet.getRange(1,4,rows.length,2).setNumberFormat('@');
   // Write one validated batch before removing leftover rows. Keep formatting intact.
   sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
   if (previousRows > rows.length) sheet.getRange(rows.length + 1, 1, previousRows - rows.length, rows[0].length).clearContent();
@@ -187,7 +191,7 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
     var payload = JSON.parse(e.postData.contents);
-    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveCashflow: 'cashflowRecords', saveStocks: 'stockRecords', saveDeposits: 'depositRecords'};
+    var actions = {saveTransactions: 'transactions', saveSummary: 'summaries', saveAssets: 'assetsRecords', saveFunds: 'fundsRecords', saveCashflow: 'cashflowRecords', saveStocks: 'stockRecords', saveDeposits: 'depositRecords', saveFixedExpenses: 'fixedExpenses'};
     var key = actions[payload.action];
     if (!key || typeof payload.expectedRevision !== 'string') throw new Error('Unsupported action or missing revision; reload the updated webpage');
     var data = payload[key], rows, name;
@@ -197,6 +201,7 @@ function doPost(e) {
       rows = [['日期','項目','金額','分類','類型']]; name = '明細';
       data.forEach(function(t) {
         if (!object_(t) || !t.id || ids[t.id] || typeof t.title !== 'string' || !t.title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(t.date) || numeric_(t.amount) <= 0) throw new Error('Invalid transaction');
+        if (String(t.type || '').indexOf('fixed-expense:')===0) throw new Error('請重新載入新版網頁，固定開銷改用一般明細分類');
         ids[t.id] = true;
         rows.push([t.date,t.title,numeric_(t.amount),String(t.category || ''),String(t.type || 'expense')]);
       });
@@ -228,6 +233,8 @@ function doPost(e) {
           if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(ym) || !object_(data[ym])) throw new Error('Invalid record month');
           rows.push([ym].concat(ASSET_FIELDS.map(function(field) { return field === 'date' || field === 'note' ? String(data[ym][field] || '') : numeric_(data[ym][field]); })));
         });
+      } else if (key === 'fixedExpenses') {
+        throw new Error('請重新載入新版網頁，固定開銷改用儲存明細');
       } else if (key === 'depositRecords') {
         name = '定存記錄-台幣'; rows = depositRows_(data);
       } else if (key === 'stockRecords') {
@@ -239,10 +246,23 @@ function doPost(e) {
       }
     }
     lock.waitLock(10000);
-    var ss = SpreadsheetApp.openById(BOOK_ID), current = read_(ss, key);
+    var ss = SpreadsheetApp.openById(BOOK_ID);
+    var ledger=(key==='transactions' || key==='fixedExpenses')?readExpenseLedger_(ss):null;
+    var current = read_(ss, key, ledger);
     if (current.datasetErrors[key]) throw new Error(current.datasetErrors[key]);
     if (current.revisions[key] !== payload.expectedRevision) return json_({status: 'conflict', message: 'Cloud data changed; reload before saving'});
+
+    var originalSheet=key==='transactions'?ss.getSheetByName('明細'):null;
+    var originalRows=originalSheet && originalSheet.getLastRow()?originalSheet.getDataRange().getValues().map(function(row){return row.slice();}):null;
     replaceRows_(ss, name, rows);
+    if (key==='transactions') {
+      try {markFixedExpenseMigration_(ss);}
+      catch (err) {
+        // Restore the prior ledger if migration cannot be marked; retry must not duplicate legacy rows.
+        replaceRows_(ss,name,originalRows || [rows[0]]);
+        throw err;
+      }
+    }
     SpreadsheetApp.flush();
     // The following targeted GET confirms persisted data; avoid a redundant read here.
     return json_({status: 'success'});
@@ -444,4 +464,98 @@ function readDeposits_(ss) {
     for (var i=0;i<annual.length;i++) if (!annual[i]) throw new Error('定存序號不連續，請保留原資料並確認序號');
   });
   return result;
+}
+
+var FIXED_EXPENSE_HEADERS = ['項目ID','起始年月','結束年月','項目','金額','分類','每月扣款日'];
+function normalizeFixedExpenses_(data) {
+  if (!object_(data) || Object.keys(data).length>1000) throw new Error('固定開銷格式或數量無效');
+  var result={},count=0;
+  function validMonth(v){return typeof v==='string' && /^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/.test(v);}
+  Object.keys(data).sort().forEach(function(id){
+    if (['__proto__','constructor','prototype'].indexOf(id)>=0 || !/^[A-Za-z0-9_-]{1,80}$/.test(id) || !Array.isArray(data[id]) || !data[id].length) throw new Error('固定開銷項目或期間無效');
+    var versions=data[id].map(function(row){
+      if (!object_(row) || Object.keys(row).some(function(k){return ['startMonth','endMonth','title','amount','category','payDay'].indexOf(k)<0;})) throw new Error('固定開銷欄位無效');
+      var end=row.endMonth===undefined || row.endMonth===null?'':row.endMonth;
+      if (!validMonth(row.startMonth) || (end!=='' && (!validMonth(end) || end<row.startMonth))) throw new Error('固定開銷月份無效');
+      if (typeof row.title!=='string' || !row.title.trim() || row.title.length>200 || typeof row.category!=='string' || !row.category.trim() || row.category.length>80) throw new Error('固定開銷名稱或分類無效');
+      var amount=numeric_(row.amount),day=numeric_(row.payDay);
+      if (amount<=0 || !Number.isInteger(day) || day<1 || day>31) throw new Error('固定開銷金額或扣款日無效');
+      return {startMonth:row.startMonth,endMonth:end,title:row.title.trim(),amount:amount,category:row.category.trim(),payDay:day};
+    }).sort(function(a,b){return a.startMonth.localeCompare(b.startMonth);});
+    for (var i=1;i<versions.length;i++) if (!versions[i-1].endMonth || versions[i-1].endMonth>=versions[i].startMonth) throw new Error('固定開銷期間重疊');
+    count+=versions.length;if (count>10000) throw new Error('固定開銷期間過多');
+    result[id]=versions;
+  });
+  return result;
+}
+function readLegacyFixedExpenses_(ss) {
+  var sheet=ss.getSheetByName('每月固定開銷'),result={};
+  if (!sheet) return result;
+  var rows=sheet.getDataRange().getValues();
+  if (sheet.getLastRow() && canonical_(rows[0].slice(0,FIXED_EXPENSE_HEADERS.length))!==canonical_(FIXED_EXPENSE_HEADERS)) throw new Error('固定開銷工作表欄位不符，已停止讀寫，請保留原資料');
+  rows.slice(1).forEach(function(row){
+    if (row.every(function(v){return v==='' || v===null || v===undefined;})) return;
+    var id=String(row[0]);
+    if (['__proto__','constructor','prototype'].indexOf(id)>=0 || !/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw new Error('固定開銷項目ID無效');
+    if (!result[id]) result[id]=[];
+    result[id].push({startMonth:month_(row[1],ss),endMonth:row[2]?month_(row[2],ss):'',title:row[3],amount:row[4],category:row[5],payDay:row[6]});
+  });
+  return normalizeFixedExpenses_(result);
+}
+
+// Legacy constants are read only during migration to category-based monthly records.
+var LEDGER_FIXED_CATEGORY = '固定開銷';
+var LEDGER_FIXED_PREFIX = 'fixed-expense:v1:';
+var LEDGER_FIXED_MIGRATION = 'SKY_MONEYBOOK_FIXED_IN_LEDGER_V1';
+function safeFixedExpenseId_(id) {
+  return typeof id==='string' && /^[A-Za-z0-9_-]{1,80}$/.test(id) && ['__proto__','constructor','prototype'].indexOf(id)<0;
+}
+// Fixed expenses are ordinary transactions. Only the exact category selects their UI section.
+var LEDGER_FIXED_MONTHLY = 'SKY_MONEYBOOK_FIXED_MONTHLY_V1';
+function readExpenseLedger_(ss) {
+  var sheet=ss.getSheetByName('明細');
+  var result={transactions:[],fixedError:'',migrationPending:false};
+  var note=sheet?sheet.getRange(1,5).getNote():'';
+  var monthly=note.indexOf(LEDGER_FIXED_MONTHLY)>=0;
+  var schedules={};
+  try {
+    if (!monthly && note.indexOf(LEDGER_FIXED_MIGRATION)<0) {
+      schedules=readLegacyFixedExpenses_(ss);
+      result.migrationPending=!!ss.getSheetByName('每月固定開銷');
+    }
+    var ledgerSchedules={};
+    (sheet?sheet.getDataRange().getValues().slice(1):[]).forEach(function(row){
+      if (!row[0]) return;
+      var date=date_(row[0],ss),type=String(row[4] || 'expense');
+      if (type.indexOf(LEDGER_FIXED_PREFIX)===0) {
+        var meta=JSON.parse(type.slice(LEDGER_FIXED_PREFIX.length));
+        if (!object_(meta) || !safeFixedExpenseId_(meta.id) || String(row[3])!==LEDGER_FIXED_CATEGORY) throw new Error('舊固定開銷設定無效，請先檢查原始資料');
+        if (!ledgerSchedules[meta.id]) ledgerSchedules[meta.id]=[];
+        ledgerSchedules[meta.id].push({startMonth:date.slice(0,7),endMonth:meta.endMonth,title:row[1],amount:row[2],category:meta.category,payDay:meta.payDay});
+        result.migrationPending=true;
+      } else {
+        result.transactions.push({id:result.transactions.length+1,date:date,title:String(row[1] || ''),amount:Number(row[2] || 0),category:String(row[3] || ''),type:type});
+      }
+    });
+    Object.keys(ledgerSchedules).forEach(function(id){schedules[id]=ledgerSchedules[id];});
+    schedules=normalizeFixedExpenses_(schedules);
+    var cutoff=Utilities.formatDate(new Date(),ss.getSpreadsheetTimeZone(),'yyyy-MM');
+    Object.keys(schedules).sort().forEach(function(id){schedules[id].forEach(function(row){
+      // Materialize only past/current occurrences. Keep an explicitly scheduled future start once.
+      var end=row.endMonth && row.endMonth<cutoff?row.endMonth:cutoff;
+      if (row.startMonth>cutoff) end=row.startMonth;
+      var ym=row.startMonth,count=0;
+      while (ym<=end) {
+        if (++count>1200) throw new Error('舊固定開銷期間超過 100 年，請先檢查原始資料');
+        var parts=ym.split('-').map(Number),day=Math.min(row.payDay,new Date(parts[0],parts[1],0).getDate());
+        result.transactions.push({id:result.transactions.length+1,date:ym+'-'+('0'+day).slice(-2),title:row.title,amount:row.amount,category:LEDGER_FIXED_CATEGORY,type:'expense'});
+        ym=parts[1]===12?(parts[0]+1)+'-01':parts[0]+'-'+('0'+(parts[1]+1)).slice(-2);
+      }
+    });});
+  } catch (err) {result.fixedError=String(err);}
+  return result;
+}
+function markFixedExpenseMigration_(ss) {
+  var cell=ss.getSheetByName('明細').getRange(1,5),note=cell.getNote();
+  if (note.indexOf(LEDGER_FIXED_MONTHLY)<0) cell.setNote((note?note+'\n':'')+LEDGER_FIXED_MONTHLY);
 }
